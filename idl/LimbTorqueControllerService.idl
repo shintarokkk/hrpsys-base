@@ -1,0 +1,68 @@
+/**
+ * @file LimbTorqueControllerService.idl
+ * @brief Services for the limb torque controller interface
+ */
+module OpenHRP
+{
+
+  interface LimbTorqueControllerService
+  {
+    typedef sequence<double, 3> DblSequence3;
+    typedef double DblArray3[3];
+    typedef sequence<double> DblSequence;
+    typedef sequence<string> StrSequence;
+    typedef sequence<sequence<double, 3> > Dbl3Sequence;
+
+    /**
+     * @enum ControllerMode
+     * @brief Mode of controller
+     */
+    enum ControllerMode {
+        MODE_IDLE,
+        MODE_ACTIVE
+    };
+
+    /**
+     * @struct limbtorqueParam
+     * @brief Limb torque controller parameters for one end-effector.
+     */
+      struct limbtorqueParam {
+          double Pgain;
+          double Dgain;
+          ControllerMode controller_mode;
+          //TODO
+          DblSequence3 force_gain;
+          DblSequence3 moment_gain;
+      };
+
+      /**
+       * @brief start limb torque controller
+       * @param name limb torque controller param's name, which basically corresponds to force sensor name
+       * @return true if set successfully, false otherwise
+       */
+      boolean startLimbTorqueController(in string name);
+
+      /**
+       * @brief stop limb torque controller
+       * @param name limb torque controller param's name, which basically corresponds to force sensor name
+       * @return true if set successfully, false otherwise
+       */
+      boolean stopLimbTorqueController(in string name);
+
+    /**
+     * @brief set limb torque parameters.
+     * @param i_param input new limb torque parameters
+     * @param name limb torque controller param's name, which basically corresponds to force sensor name
+     * @return true if set successfully, false otherwise
+     */
+    boolean setLimbTorqueControllerParam(in string name, in limbtorqueParam i_param);
+
+    /**
+     * @brief get limb torque parameters.
+     * @param i_param ouput limb torque parameters
+     * @param name limb torque controller param's name, which basically corresponds to force sensor name
+     * @return true if set successfully, false otherwise
+     */
+    boolean getLimbTorqueControllerParam(in string name, out limbtorqueParam i_param);
+  };
+};

@@ -25,6 +25,8 @@ static const char* limbtorquecontroller_spec[] =
         "lang_type",         "compile",
         // Configuration variables
         "conf.default.debugLevel", "0",
+        "conf.default.pgain", "1000",
+        "conf.default.dgain", "1000",
         ""
     };
 // </rtc-template>
@@ -42,6 +44,7 @@ LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
       m_robot(hrp::BodyPtr()),
       m_robotRef(hrp::BodyPtr()),
       m_debugLevel(0),
+      m_pgain(1000),m_dgain(1000),
       dummy(0)
 {
     m_service0.limbtorque(this);
@@ -55,6 +58,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 {
     std::cerr << "[" << m_profile.instance_name << "] onInitialize()" << std::endl;
     bindParameter("debugLevel", m_debugLevel, "0");
+    bindParameter("pgain", m_pgain, "1000");
+    bindParameter("dgain", m_dgain, "1000");
 
     addInPort("qCurrent", m_qCurrentIn);
     addInPort("qRef", m_qRefIn);
@@ -86,6 +91,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     }
     nameServer = nameServer.substr(0, comPos);
     RTC::CorbaNaming naming(rtcManager.getORB(), nameServer.c_str());
+    std::cout << "Model file name = " << prop["model"].c_str() << std::endl;
     if (!loadBodyFromModelLoader(m_robot, prop["model"].c_str(),
                                  CosNaming::NamingContext::_duplicate(naming.getRootContext())
                                  )){
@@ -221,8 +227,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 4. Set limb torque param
         p.sensor_name = sensor_name;
-        p.pgain = 1.0; //TODO: tune, enable to read from conf
-        p.dgain = 1.0; //TODO: tune, enable to read from conf
+        p.pgain = m_pgain*1e-5; //TODO: tune, enable to read from conf
+        p.dgain = m_dgain*1e-5; //TODO: tune, enable to read from conf
         m_lt_param[ee_name] = p;
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee-link = " << target_link->name << std::endl;
     }
@@ -269,7 +275,9 @@ RTC::ReturnCode_t LimbTorqueController::onDeactivated(RTC::UniqueId ec_id)
 #define DEBUGP ((m_debugLevel==1 && loop%200==0) || m_debugLevel > 1 )
 RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 {
-    //std::cout << "LimbTorqueController::onExecute(" << ec_id << ")" << std::endl;
+    if(DEBUGP){
+       std::cout << "[" << m_profile.instance_name << "]" << "(" << ec_id << "):" << __func__ << std::endl;
+   }
    loop ++;
 
    //Read Import
@@ -277,6 +285,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_qCurrentIn.read();
    }
    if (m_qRefIn.isNew()) {
+       //std::cout << "bbbbbbbbbb" << std::endl;
        m_qRefIn.read();
    }
    if (m_basePosIn.isNew()) {
@@ -289,26 +298,34 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_rpyIn.read();
    }
 
-   getTargetParameters(); //上位から来るref値を変数にセット
-   getActualParameters(); //センサ値を変数にセット
+   if ( m_qRef.data.length() ==  m_robot->numJoints() &&
+        m_qCurrent.data.length() ==  m_robot->numJoints() ) {
+       getTargetParameters(); //上位から来るref値を変数にセット
+       getActualParameters(); //センサ値を変数にセット
+       //std::cout << "eeeeeeeeeeeeee" << std::endl;
+       //参照トルク計算
+       //以下の関数内部で各joint->uにトルクを加算していく
+       calcGravityCompensation(); //重力補償: uを設定
+       calcJointDumpingTorque(); //関節角度ダンピング
+       //calcEndEffectorForceTorque(); //あとで実装
+       //calcMinMaxAvoidanceTorque();
+       //データの記述?
+       //Write Outport
+       std::cout << "m_tq=[";
+       for ( size_t i = 0; i<m_robot->numJoints(); ++i){
+           m_q.data[i] = m_robotRef->joint(i)->q; //same as input qRef at this moment
+           m_tq.data[i] = m_robot->joint(i)->u;
+           printf("%3.2lf",m_tq.data[i]);
+           if( i==m_robot->numJoints()-1){
+               printf("]\n");
+           }else{
+               printf(", ");
+           }
+       }
 
-   //参照トルク計算
-   //以下の関数内部で各joint->uにトルクを加算していく
-   calcGravityCompensation(); //重力補償: uを設定
-   calcJointDumpingTorque(); //関節角度ダンピング
-   //calcEndEffectorForceTorque(); //あとで実装
-   //calcMinMaxAvoidanceTorque();
-
-   //データの記述?
-
-   //Write Outport
-   for ( size_t i = 0; m_robot->numJoints(); ++i){
-       m_q.data[i] = m_robotRef->joint(i)->q; //same as input qRef at this moment
-       m_tq.data[i] = m_robot->joint(i)->u;
+       m_qOut.write();
+       m_tqOut.write();
    }
-
-   m_qOut.write();
-   m_tqOut.write();
 
    return RTC::RTC_OK;
 }
@@ -325,16 +342,24 @@ void LimbTorqueController::getTargetParameters()
 void LimbTorqueController::getActualParameters()
 {
     //Current robot state
-    for ( unsigned int i = 0; m_robot->numJoints(); ++i ){
+    for ( unsigned int i = 0; i<m_robot->numJoints(); ++i ){
         m_robot->joint(i)->q = m_qCurrent.data[i];
-        m_robot->joint(i)->dq = loop>0 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0; //OK?
+        m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0; //OK?
+        m_robot->joint(i)->u = 0;
         qold[i] = m_qCurrent.data[i];
     }
     m_robot->rootLink()->p = hrp::Vector3::Zero();
     m_robot->calcForwardKinematics(); //何してるか理解してない(duplicated from ST)
+
+#if 0
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
     hrp::Matrix33 senR = sen->link->R * sen->localR;
     hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
+#else
+    hrp::Matrix33 senR = hrp::Matrix33::Identity();
+    hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
+#endif
+
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics(); //なぜ二回呼んでるか理解してない(duplicated from ST)
 }
@@ -350,8 +375,9 @@ void LimbTorqueController::calcGravityCompensation()
             }
             hrp::JointPathExPtr manip = param.manip;
             hrp::Vector3 tmp_f, tmp_tau;
-            GCCallback(manip->endLink(),tmp_f, tmp_tau);
+            GCCallback(manip->baseLink(),tmp_f, tmp_tau);
         }
+        ++it;
     } //end while
 }
 
@@ -371,8 +397,10 @@ void LimbTorqueController::calcJointDumpingTorque()
                 hrp::Link* ref_joint = m_robotRef->joint(act_joint->jointId);
                 double q_error = act_joint->q - ref_joint->q;
                 double dq_error = act_joint->dq - ref_joint->dq; //inport追加の必要あり
-                act_joint->u += m_lt_param[ee_name].pgain*q_error + m_lt_param[ee_name].dgain*dq_error;
+                //act_joint->u += -m_pgain*1e-5*q_error - m_dgain*1e-5*dq_error;
+                act_joint->u += -m_lt_param[ee_name].pgain*1e3*q_error - m_lt_param[ee_name].dgain*1e3*dq_error;
             }}
+        ++it;
     }
 }
 
@@ -399,7 +427,6 @@ void LimbTorqueController::GCCallback(hrp::Link* ptr, hrp::Vector3& out_f, hrp::
         ptr->sw = sw;
         ptr->sv = sv;
     }
-
     hrp::Vector3  c,P,L;
     hrp::Matrix33 I,c_hat;
 
@@ -421,7 +448,8 @@ void LimbTorqueController::GCCallback(hrp::Link* ptr, hrp::Vector3& out_f, hrp::
         out_tau += tau_c;
     }
 
-    ptr->u = ptr->sv.dot(out_f) + ptr->sw.dot(out_tau);  //must be "+=" if not called first
+    ptr->u += ptr->sv.dot(out_f) + ptr->sw.dot(out_tau);  //must be "+=" if not called first
+    std::cout << "GC Called! loop: " << loop <<  std::endl;
 
     if(ptr->sibling){
         hrp::Vector3 f_s;

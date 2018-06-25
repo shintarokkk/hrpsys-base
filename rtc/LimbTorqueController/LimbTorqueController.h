@@ -110,6 +110,7 @@ private:
     unsigned int m_debugLevel;
     int dummy;
     unsigned int loop;
+    unsigned int m_pgain, m_dgain;
 };
 
 extern "C"

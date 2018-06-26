@@ -229,6 +229,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p.sensor_name = sensor_name;
         p.pgain = m_pgain*1e-5; //TODO: tune, enable to read from conf
         p.dgain = m_dgain*1e-5; //TODO: tune, enable to read from conf
+        p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
         m_lt_param[ee_name] = p;
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee-link = " << target_link->name << std::endl;
     }
@@ -285,7 +286,6 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_qCurrentIn.read();
    }
    if (m_qRefIn.isNew()) {
-       //std::cout << "bbbbbbbbbb" << std::endl;
        m_qRefIn.read();
    }
    if (m_basePosIn.isNew()) {
@@ -302,25 +302,26 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
         m_qCurrent.data.length() ==  m_robot->numJoints() ) {
        getTargetParameters(); //上位から来るref値を変数にセット
        getActualParameters(); //センサ値を変数にセット
-       //std::cout << "eeeeeeeeeeeeee" << std::endl;
+
        //参照トルク計算
        //以下の関数内部で各joint->uにトルクを加算していく
-       calcGravityCompensation(); //重力補償: uを設定
+       calcGravityCompensation(); //重力補償
        calcJointDumpingTorque(); //関節角度ダンピング
        //calcEndEffectorForceTorque(); //あとで実装
        //calcMinMaxAvoidanceTorque();
        //データの記述?
        //Write Outport
-       std::cout << "m_tq=[";
+
+       //std::cout << "m_tq=[";
        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
            m_q.data[i] = m_robotRef->joint(i)->q; //same as input qRef at this moment
            m_tq.data[i] = m_robot->joint(i)->u;
-           printf("%3.2lf",m_tq.data[i]);
-           if( i==m_robot->numJoints()-1){
-               printf("]\n");
-           }else{
-               printf(", ");
-           }
+           // printf("%3.2lf",m_tq.data[i]);
+           // if( i==m_robot->numJoints()-1){
+           //     printf("]\n");
+           // }else{
+           //     printf(", ");
+           // }
        }
 
        m_qOut.write();
@@ -334,7 +335,7 @@ void LimbTorqueController::getTargetParameters()
 {
     for ( size_t i = 0; i < m_robotRef->numJoints(); ++i){
         m_robotRef->joint(i)->q = m_qRef.data[i];
-        m_robotRef->joint(i)->dq = loop>0 ? ( m_qRef.data[i] - qoldRef[i] ) / m_dt : 0; //OK?
+        m_robotRef->joint(i)->dq = loop>1 ? ( m_qRef.data[i] - qoldRef[i] ) / m_dt : 0;
         qoldRef[i] = m_qRef.data[i];
     }
 }
@@ -344,12 +345,12 @@ void LimbTorqueController::getActualParameters()
     //Current robot state
     for ( unsigned int i = 0; i<m_robot->numJoints(); ++i ){
         m_robot->joint(i)->q = m_qCurrent.data[i];
-        m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0; //OK?
+        m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0;
         m_robot->joint(i)->u = 0;
         qold[i] = m_qCurrent.data[i];
     }
     m_robot->rootLink()->p = hrp::Vector3::Zero();
-    m_robot->calcForwardKinematics(); //何してるか理解してない(duplicated from ST)
+    m_robot->calcForwardKinematics();
 
 #if 0
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
@@ -361,7 +362,7 @@ void LimbTorqueController::getActualParameters()
 #endif
 
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
-    m_robot->calcForwardKinematics(); //なぜ二回呼んでるか理解してない(duplicated from ST)
+    m_robot->calcForwardKinematics();
 }
 
 void LimbTorqueController::calcGravityCompensation()
@@ -375,7 +376,22 @@ void LimbTorqueController::calcGravityCompensation()
             }
             hrp::JointPathExPtr manip = param.manip;
             hrp::Vector3 tmp_f, tmp_tau;
-            GCCallback(manip->baseLink(),tmp_f, tmp_tau);
+            //TODO: add sibling
+            hrp::Link* tmp_updating_joint = manip->endLink();
+            while (tmp_updating_joint->parent) {
+                tmp_updating_joint->wc = tmp_updating_joint->p + tmp_updating_joint->R*tmp_updating_joint->c; //position of CoM of the link
+                if (tmp_updating_joint->child) {
+                    tmp_updating_joint->subm = tmp_updating_joint->child->subm + tmp_updating_joint->m; //total mass of subtree
+                    tmp_updating_joint->submwc = tmp_updating_joint->m*tmp_updating_joint->wc + tmp_updating_joint->child->submwc; //total momentum of subtree around world origin
+                }else{
+                    tmp_updating_joint->subm = tmp_updating_joint->m;
+                    tmp_updating_joint->submwc = tmp_updating_joint->m*tmp_updating_joint->wc;
+                }
+                hrp::Vector3 world_joint_axis = tmp_updating_joint->R*tmp_updating_joint->a;
+                hrp::Vector3 local_moment_arm = tmp_updating_joint->submwc/tmp_updating_joint->subm - tmp_updating_joint->p;
+                tmp_updating_joint->u += tmp_updating_joint->subm*(local_moment_arm.cross(param.gravitational_acceleration)).dot(world_joint_axis);
+                tmp_updating_joint = tmp_updating_joint->parent;
+            }
         }
         ++it;
     } //end while
@@ -398,65 +414,12 @@ void LimbTorqueController::calcJointDumpingTorque()
                 double q_error = act_joint->q - ref_joint->q;
                 double dq_error = act_joint->dq - ref_joint->dq; //inport追加の必要あり
                 //act_joint->u += -m_pgain*1e-5*q_error - m_dgain*1e-5*dq_error;
+                std::cout << "before " << __func__ << ": u for " << act_joint->name << " is " << act_joint->u << std::endl;
                 act_joint->u += -m_lt_param[ee_name].pgain*1e3*q_error - m_lt_param[ee_name].dgain*1e3*dq_error;
+                std::cout << "in" << __func__ << ": adding u for " << act_joint->name << " is " << -m_lt_param[ee_name].pgain*1e3*q_error - m_lt_param[ee_name].dgain*1e3*dq_error << std::endl;
+                std::cout << "after " << __func__ << ": u for " << act_joint->name << " is " << act_joint->u << std::endl;
             }}
         ++it;
-    }
-}
-
-//duplicated from Body.cpp: calcInverseDynamics in openhrp3
-void LimbTorqueController::GCCallback(hrp::Link* ptr, hrp::Vector3& out_f, hrp::Vector3& out_tau)
-{
-    hrp::Link* parent = ptr->parent;
-    if(parent){
-        hrp::Vector3 dsv, dsw, sv, sw;
-
-        if(ptr->jointType != hrp::Link::FIXED_JOINT){
-            sw.noalias() = parent->R * ptr->a;
-            sv = ptr->p.cross(sw);
-        }else{
-            sw.setZero();
-            sv.setZero();
-        }
-        dsv = parent->w.cross(sv) + parent->vo.cross(sw);
-        dsw = parent->w.cross(sw);
-
-        ptr->dw  = parent->dw  + dsw * ptr->dq;// + sw * ptr->ddq;
-        ptr->dvo = parent->dvo + dsv * ptr->dq;// + sv * ptr->ddq;
-
-        ptr->sw = sw;
-        ptr->sv = sv;
-    }
-    hrp::Vector3  c,P,L;
-    hrp::Matrix33 I,c_hat;
-
-    c = ptr->R * ptr->c + ptr->p;
-    I.noalias() = ptr->R * ptr->I * ptr->R.transpose();
-    c_hat = hrp::hat(c);
-    I.noalias() += ptr->m * c_hat * c_hat.transpose();
-    P.noalias() = ptr->m * (ptr->vo + ptr->w.cross(c));
-    L = ptr->m * c.cross(ptr->vo) + I * ptr->w;
-
-    out_f   = ptr->m * (ptr->dvo + ptr->dw.cross(c)) + ptr->w.cross(P);
-    out_tau = ptr->m * c.cross(ptr->dvo) + I * ptr->dw + ptr->vo.cross(P) + ptr->w.cross(L);
-
-    if(ptr->child){
-        hrp::Vector3 f_c;
-        hrp::Vector3 tau_c;
-        GCCallback(ptr->child, f_c, tau_c);
-        out_f   += f_c;
-        out_tau += tau_c;
-    }
-
-    ptr->u += ptr->sv.dot(out_f) + ptr->sw.dot(out_tau);  //must be "+=" if not called first
-    std::cout << "GC Called! loop: " << loop <<  std::endl;
-
-    if(ptr->sibling){
-        hrp::Vector3 f_s;
-        hrp::Vector3 tau_s;
-        GCCallback(ptr->sibling, f_s, tau_s);
-        out_f   += f_s;
-        out_tau += tau_s;
     }
 }
 

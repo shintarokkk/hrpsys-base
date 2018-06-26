@@ -96,7 +96,6 @@ private:
     void getActualParameters();
     void calcGravityCompensation();
     void calcJointDumpingTorque();
-    void GCCallback (hrp::Link* ptr, hrp::Vector3& out_f, hrp::Vector3& out_tau);
 
     std::map<std::string, LTParam> m_lt_param;
     std::map<std::string, ee_trans> ee_map;

@@ -7,7 +7,16 @@
 #include <hrpModel/JointPath.h>
 #include <hrpUtil/Eigen3d.h>
 
+#include <time.h>
+
 typedef coil::Guard<coil::Mutex> Guard;
+
+#ifndef deg2rad
+#define deg2rad(x) ((x) * M_PI / 180.0)
+#endif
+#ifndef rad2deg
+#define rad2deg(rad) (rad * 180 / M_PI)
+#endif
 
 // Module specification
 // <rtc-template block="module_spec">
@@ -44,7 +53,6 @@ LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
       m_robot(hrp::BodyPtr()),
       m_robotRef(hrp::BodyPtr()),
       m_debugLevel(0),
-      m_pgain(1000),m_dgain(1000),
       dummy(0)
 {
     m_service0.limbtorque(this);
@@ -58,8 +66,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 {
     std::cerr << "[" << m_profile.instance_name << "] onInitialize()" << std::endl;
     bindParameter("debugLevel", m_debugLevel, "0");
-    bindParameter("pgain", m_pgain, "1000");
-    bindParameter("dgain", m_dgain, "1000");
 
     addInPort("qCurrent", m_qCurrentIn);
     addInPort("qRef", m_qRefIn);
@@ -150,15 +156,20 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 
     // setting from conf file
     coil::vstring end_effectors_str = coil::split(prop["end_effectors"], ",");
+    coil::vstring ltc_pgain_str = coil::split(prop["ltc_pgain"], ",");
+    coil::vstring ltc_dgain_str = coil::split(prop["ltc_dgain"], ",");
     std::map<std::string, std::string> base_name_map;
     if (end_effectors_str.size() > 0) {
         size_t prop_num = 10; //the number of parameters of each end effector in conf file: "ee-name, ee-link-name, base-link-name, pos.x, pos.y, pos.z, rot-axis,x, rot-axis.y, rot-axis.z, rot-angle"
         size_t num = end_effectors_str.size()/prop_num;
         for (size_t i = 0; i < num; i++) {
             std::string ee_name, ee_target, ee_base;
+            double conf_pgain, conf_dgain;
             coil::stringTo(ee_name, end_effectors_str[i*prop_num].c_str());
             coil::stringTo(ee_target, end_effectors_str[i*prop_num+1].c_str());
             coil::stringTo(ee_base, end_effectors_str[i*prop_num+2].c_str());
+            coil::stringTo(conf_pgain, ltc_pgain_str[i].c_str());
+            coil::stringTo(conf_dgain, ltc_dgain_str[i].c_str());
             ee_trans eet;
             for (size_t j = 0; j < 3; j++) {
                 coil::stringTo(eet.localPos(j), end_effectors_str[i*prop_num+3+j].c_str());
@@ -169,6 +180,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             }
             eet.localR = Eigen::AngleAxis<double>(tmpv[3], hrp::Vector3(tmpv[0], tmpv[1], tmpv[2])).toRotationMatrix(); // rotation in VRML is represented by axis + angle
             eet.target_name = ee_target;
+            eet.pgain = conf_pgain;
+            eet.dgain = conf_dgain;
             ee_map.insert(std::pair<std::string, ee_trans>(ee_name , eet));
             base_name_map.insert(std::pair<std::string, std::string>(ee_name, ee_base));
             std::cerr << "[" << m_profile.instance_name << "] End Effector [" << ee_name << "]" << ee_target << " " << ee_base << std::endl;
@@ -196,6 +209,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 1. Check whether adequate ee_map exists for the sensor.
         std::string ee_name;
+        double eet_pgain, eet_dgain;
         bool is_ee_exists = false;
         for ( std::map<std::string, ee_trans>::iterator it = ee_map.begin(); it != ee_map.end(); ++it ) {
             hrp::Link* alink = m_robot->link(it->second.target_name);
@@ -204,6 +218,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
                 if ( alink->name == sensor_link_name ) {
                     is_ee_exists = true;
                     ee_name = it->first;
+                    eet_pgain = it->second.pgain;
+                    eet_dgain = it->second.dgain;
                 }
                 alink = alink->parent;
             }
@@ -227,8 +243,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 4. Set limb torque param
         p.sensor_name = sensor_name;
-        p.pgain = m_pgain*1e-5; //TODO: tune, enable to read from conf
-        p.dgain = m_dgain*1e-5; //TODO: tune, enable to read from conf
+        p.pgain = eet_pgain;
+        p.dgain = eet_dgain;
         p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
         m_lt_param[ee_name] = p;
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee-link = " << target_link->name << std::endl;
@@ -249,6 +265,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     qold.resize(dof);
     qoldRef.resize(dof);
     loop = 0;
+
+    start = clock();
 
     return RTC::RTC_OK;
 }
@@ -298,6 +316,14 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_rpyIn.read();
    }
 
+   //Measure Time
+   // if (loop%10000 == 0) {
+   //     end = clock();
+   //     double loop_sec = (double)(end - start) / CLOCKS_PER_SEC;
+   //     std::cout << "\n\n\nmeasuring LimbTorqueController loop time\n" << loop_sec << "sec for 10000 loop\n" << 10000.0 /loop_sec << "Hz\n\n";
+   //     start = clock();
+   // }
+
    if ( m_qRef.data.length() ==  m_robot->numJoints() &&
         m_qCurrent.data.length() ==  m_robot->numJoints() ) {
        getTargetParameters(); //上位から来るref値を変数にセット
@@ -308,7 +334,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        calcGravityCompensation(); //重力補償
        calcJointDumpingTorque(); //関節角度ダンピング
        //calcEndEffectorForceTorque(); //あとで実装
-       //calcMinMaxAvoidanceTorque();
+       calcMinMaxAvoidanceTorque();
        //データの記述?
        //Write Outport
 
@@ -413,12 +439,40 @@ void LimbTorqueController::calcJointDumpingTorque()
                 hrp::Link* ref_joint = m_robotRef->joint(act_joint->jointId);
                 double q_error = act_joint->q - ref_joint->q;
                 double dq_error = act_joint->dq - ref_joint->dq; //inport追加の必要あり
-                //act_joint->u += -m_pgain*1e-5*q_error - m_dgain*1e-5*dq_error;
-                std::cout << "before " << __func__ << ": u for " << act_joint->name << " is " << act_joint->u << std::endl;
-                act_joint->u += -m_lt_param[ee_name].pgain*1e3*q_error - m_lt_param[ee_name].dgain*1e3*dq_error;
-                std::cout << "in" << __func__ << ": adding u for " << act_joint->name << " is " << -m_lt_param[ee_name].pgain*1e3*q_error - m_lt_param[ee_name].dgain*1e3*dq_error << std::endl;
-                std::cout << "after " << __func__ << ": u for " << act_joint->name << " is " << act_joint->u << std::endl;
+                act_joint->u += -m_lt_param[ee_name].pgain*q_error - m_lt_param[ee_name].dgain*dq_error;
             }}
+        ++it;
+    }
+}
+
+void LimbTorqueController::calcMinMaxAvoidanceTorque()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::JointPathExPtr manip = param.manip;
+            double margin = deg2rad(4.0);
+            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
+                double now_angle = manip->joint(i)->q;
+                double max_angle = manip->joint(i)->ulimit;
+                double min_angle = manip->joint(i)->llimit;
+                if ( (now_angle+margin) >= max_angle) {
+                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                    manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
+                    if (loop%10 == 0){
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i) << " is near limit: " << "max=" << max_angle << ", now=" << now_angle << ", applying min/max avoidance torque." << std::endl;}
+                }else if ( (now_angle-margin) <= min_angle) {
+                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                    manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
+                    if (loop%10 == 0){
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i) << " is near limit: " << "min=" << min_angle << ", now=" << now_angle << ", applying min/max avoidance torque." << std::endl;}
+                }
+            }
+        }
         ++it;
     }
 }
@@ -455,6 +509,7 @@ bool LimbTorqueController::stopLimbTorqueController(const std::string& i_name_)
         }
         std::cerr << "[" << m_profile.instance_name << "] Stop limbtorque control [" << i_name_ << "]" << std::endl;
         //TODO: stop limb torque control
+        m_lt_param[i_name_].is_active = false; //need transition?
     }
     return true;
 }

@@ -89,6 +89,7 @@ private:
         std::string target_name;
         hrp::Vector3 localPos;
         hrp::Matrix33 localR;
+        double pgain, dgain; //for initialization
     };
 
     void copyLimbTorqueControllerParam (OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param);
@@ -96,6 +97,7 @@ private:
     void getActualParameters();
     void calcGravityCompensation();
     void calcJointDumpingTorque();
+    void calcMinMaxAvoidanceTorque();
 
     std::map<std::string, LTParam> m_lt_param;
     std::map<std::string, ee_trans> ee_map;
@@ -109,7 +111,7 @@ private:
     unsigned int m_debugLevel;
     int dummy;
     unsigned int loop;
-    unsigned int m_pgain, m_dgain;
+    clock_t start, end;
 };
 
 extern "C"

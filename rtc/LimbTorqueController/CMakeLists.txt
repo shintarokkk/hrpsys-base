@@ -1,4 +1,4 @@
-set(comp_sources LimbTorqueController.cpp LimbTorqueControllerService_impl.cpp  LimbTorqueControllerComp.cpp ../ImpedanceController/JointPathEx.cpp)
+set(comp_sources LimbTorqueController.cpp LimbTorqueControllerService_impl.cpp ../ImpedanceController/JointPathEx.cpp)
 set(libs hrpModel-3.1 hrpUtil-3.1 hrpsysBaseStub)
 add_library(LimbTorqueController SHARED ${comp_sources})
 target_link_libraries(LimbTorqueController ${libs})

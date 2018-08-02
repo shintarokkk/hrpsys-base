@@ -23,6 +23,15 @@ module OpenHRP
     };
 
     /**
+     * @enum TorqueOutputType
+     * @brief Mode of calculation of torque
+     */
+    enum TorqueOutputType {
+        CALC_TORQUE,
+        REF_TORQUE
+    };
+
+    /**
      * @struct limbtorqueParam
      * @brief Limb torque controller parameters for one end-effector.
      */
@@ -30,6 +39,7 @@ module OpenHRP
           double Pgain;
           double Dgain;
           ControllerMode controller_mode;
+          TorqueOutputType torque_output_type;
           //TODO
           DblSequence3 force_gain;
           DblSequence3 moment_gain;
@@ -64,5 +74,6 @@ module OpenHRP
      * @return true if set successfully, false otherwise
      */
     boolean getLimbTorqueControllerParam(in string name, out limbtorqueParam i_param);
+
   };
 };

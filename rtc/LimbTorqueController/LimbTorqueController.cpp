@@ -7,7 +7,7 @@
 #include <hrpModel/JointPath.h>
 #include <hrpUtil/Eigen3d.h>
 
-#include <time.h>
+#include "../RobotHardware/RobotHardwareService_impl.h"
 
 typedef coil::Guard<coil::Mutex> Guard;
 
@@ -43,7 +43,9 @@ static const char* limbtorquecontroller_spec[] =
 LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
     : RTC::DataFlowComponentBase(manager),
       m_qCurrentIn("qCurrent", m_qCurrent), //センサ値:重力補償用
+      m_dqCurrentIn("dqCurrent", m_dqCurrent),
       m_qRefIn("qRef", m_qRef),
+      m_tqRefIn("tqRef", m_tqRef),
       m_basePosIn("basePosIn", m_basePos), //eus等からのref値
       m_baseRpyIn("baseRpyIn", m_baseRpy), //eus等からのref値
       m_rpyIn("rpy", m_rpy), //IMU情報
@@ -68,7 +70,9 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     bindParameter("debugLevel", m_debugLevel, "0");
 
     addInPort("qCurrent", m_qCurrentIn);
+    addInPort("dqCurrent", m_dqCurrentIn);
     addInPort("qRef", m_qRefIn);
+    addInPort("tqRef", m_tqRefIn);
     addInPort("basePosIn", m_basePosIn);
     addInPort("baseRpyIn", m_baseRpyIn);
     addInPort("rpy", m_rpyIn);
@@ -153,6 +157,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         return RTC::RTC_ERROR;
       }
     }
+    torque_output_type = CALC_TORQUE;
 
     // setting from conf file
     coil::vstring end_effectors_str = coil::split(prop["end_effectors"], ",");
@@ -162,6 +167,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     if (end_effectors_str.size() > 0) {
         size_t prop_num = 10; //the number of parameters of each end effector in conf file: "ee-name, ee-link-name, base-link-name, pos.x, pos.y, pos.z, rot-axis,x, rot-axis.y, rot-axis.z, rot-angle"
         size_t num = end_effectors_str.size()/prop_num;
+        default_pgain.resize(num);
+        default_dgain.resize(num);
         for (size_t i = 0; i < num; i++) {
             std::string ee_name, ee_target, ee_base;
             double conf_pgain, conf_dgain;
@@ -182,6 +189,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             eet.target_name = ee_target;
             eet.pgain = conf_pgain;
             eet.dgain = conf_dgain;
+            default_pgain[i] = conf_pgain;
+            default_dgain[i] = conf_dgain;
             ee_map.insert(std::pair<std::string, ee_trans>(ee_name , eet));
             base_name_map.insert(std::pair<std::string, std::string>(ee_name, ee_base));
             std::cerr << "[" << m_profile.instance_name << "] End Effector [" << ee_name << "]" << ee_target << " " << ee_base << std::endl;
@@ -241,6 +250,21 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             std::cerr << "[" << m_profile.instance_name << "]   Invalid joint path from " << base_name_map[ee_name] << " to " << target_link->name << "!! Limb torque param for " << sensor_name << " cannot be added!!" << std::endl;
             continue;
         }
+        // p.basic_jacobians.resize(p.manip->numJoints());
+        // p.inertia_matrices.resize(p.manip->numJoints());
+        // p.gen_inertia_matrix = Eigen::MatrixXd::Zero(p.manip->numJoints(), p.manip->numJoints());
+        //Set size of matrices used in inertial compensation
+        // for (int i=0; i<p.manip->numJoints(); ++i){
+        //     p.basic_jacobians[i] = Eigen::MatrixXd::Zero(6, p.manip->numJoints());
+        //     p.inertia_matrices[i] = Eigen::MatrixXd::Zero(6, 6);
+        //     p.inertia_matrices[i] <<
+        //         p.manip->joint(i)->m, 0.0, 0.0, 0.0, 0.0, 0.0,
+        //         0.0, p.manip->joint(i)->m, 0.0, 0.0, 0.0, 0.0,
+        //         0.0, 0.0, p.manip->joint(i)->m, 0.0, 0.0, 0.0,
+        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(0),
+        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(1),
+        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(2);
+        // }
         // 4. Set limb torque param
         p.sensor_name = sensor_name;
         p.pgain = eet_pgain;
@@ -263,10 +287,14 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     m_q.data.length(dof);
     m_tq.data.length(dof);
     qold.resize(dof);
+    dqold.resize(dof);
     qoldRef.resize(dof);
+    dqoldRef.resize(dof);
+    for (int i=0; i<dof; ++i){
+        qoldRef[i] = 0.0;
+        dqoldRef[i] = 0.0;
+    }
     loop = 0;
-
-    start = clock();
 
     return RTC::RTC_OK;
 }
@@ -287,8 +315,7 @@ RTC::ReturnCode_t LimbTorqueController::onDeactivated(RTC::UniqueId ec_id)
 {
   std::cerr << "[" << m_profile.instance_name<< "] onDeactivated(" << ec_id << ")" << std::endl;
 
-  //必要ならパラメータ等リセット
-  return RTC::RTC_OK;
+  //必要ならパラメータ等リセットd  return RTC::RTC_OK;
 }
 
 #define DEBUGP ((m_debugLevel==1 && loop%200==0) || m_debugLevel > 1 )
@@ -303,8 +330,14 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
    if (m_qCurrentIn.isNew()) {
        m_qCurrentIn.read();
    }
+   if (m_dqCurrentIn.isNew()) {
+       m_dqCurrentIn.read();
+   }
    if (m_qRefIn.isNew()) {
        m_qRefIn.read();
+   }
+   if (m_tqRefIn.isNew()) {
+       m_tqRefIn.read();
    }
    if (m_basePosIn.isNew()) {
        m_basePosIn.read();
@@ -316,27 +349,28 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_rpyIn.read();
    }
 
-   //Measure Time
-   // if (loop%10000 == 0) {
-   //     end = clock();
-   //     double loop_sec = (double)(end - start) / CLOCKS_PER_SEC;
-   //     std::cout << "\n\n\nmeasuring LimbTorqueController loop time\n" << loop_sec << "sec for 10000 loop\n" << 10000.0 /loop_sec << "Hz\n\n";
-   //     start = clock();
-   // }
-
    if ( m_qRef.data.length() ==  m_robot->numJoints() &&
-        m_qCurrent.data.length() ==  m_robot->numJoints() ) {
+        m_qCurrent.data.length() ==  m_robot->numJoints() &&
+        m_dqCurrent.data.length() == m_robot->numJoints()) {
        getTargetParameters(); //上位から来るref値を変数にセット
        getActualParameters(); //センサ値を変数にセット
 
-       //参照トルク計算
-       //以下の関数内部で各joint->uにトルクを加算していく
-       calcGravityCompensation(); //重力補償
-       calcJointDumpingTorque(); //関節角度ダンピング
-       //calcEndEffectorForceTorque(); //あとで実装
-       calcMinMaxAvoidanceTorque();
-       //データの記述?
-       //Write Outport
+       //ImpactHandler();
+
+       if (torque_output_type == CALC_TORQUE) {
+           //参照トルク計算
+           //以下の関数内部で各joint->uにトルクを加算していく
+           //calcGravityCompensation(); //重力補償
+           //calcInertiaCompensation();
+           calcLimbInverseDynamics();
+           calcJointDumpingTorque(); //関節角度ダンピング
+           calcMinMaxAvoidanceTorque();
+           //データの記述?
+           //Write Outport
+       }
+       // else if (torque_output_type == REF_TORQUE) {
+       //     addDumpingToRefTorque();
+       // }
 
        //std::cout << "m_tq=[";
        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
@@ -362,7 +396,14 @@ void LimbTorqueController::getTargetParameters()
     for ( size_t i = 0; i < m_robotRef->numJoints(); ++i){
         m_robotRef->joint(i)->q = m_qRef.data[i];
         m_robotRef->joint(i)->dq = loop>1 ? ( m_qRef.data[i] - qoldRef[i] ) / m_dt : 0;
+        m_robotRef->joint(i)->ddq = (m_robotRef->joint(i)->dq - dqoldRef[i]) / m_dt;
+        //if 外から指令値in set 指令値 as dqRef & ddqRef
         qoldRef[i] = m_qRef.data[i];
+        dqoldRef[i] = m_robotRef->joint(i)->dq;
+        if (torque_output_type == REF_TORQUE){
+            //m_robot->joint(i)->u = m_tqRef.data[i];
+            m_robot->joint(i)->u = 0; //temporary
+        }
     }
 }
 
@@ -371,8 +412,12 @@ void LimbTorqueController::getActualParameters()
     //Current robot state
     for ( unsigned int i = 0; i<m_robot->numJoints(); ++i ){
         m_robot->joint(i)->q = m_qCurrent.data[i];
-        m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0;
-        m_robot->joint(i)->u = 0;
+        //m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0;
+        m_robot->joint(i)->dq = m_dqCurrent.data[i];
+        m_robot->joint(i)->ddq = m_robotRef->joint(i)->ddq; //TODO
+        if (torque_output_type != REF_TORQUE){
+            m_robot->joint(i)->u = 0;
+        }
         qold[i] = m_qCurrent.data[i];
     }
     m_robot->rootLink()->p = hrp::Vector3::Zero();
@@ -389,6 +434,30 @@ void LimbTorqueController::getActualParameters()
 
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics();
+}
+
+void LimbTorqueController::calcLimbInverseDynamics()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::Link* base_link = param.manip->baseLink();
+            Eigen::MatrixXd base_rot = base_link->R;
+            //TODO: set out f, tau
+            hrp::Vector3 out_f, out_tau;
+            out_f = Eigen::Vector3d::Zero(3);
+            out_tau = Eigen::Vector3d::Zero(3);
+            //TODO: acceleration of baseLink due to fullbody movement
+            base_link->dvo = base_rot * param.gravitational_acceleration;
+            base_link->dw.setZero();
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+        }
+        ++it;
+    }
 }
 
 void LimbTorqueController::calcGravityCompensation()
@@ -423,6 +492,41 @@ void LimbTorqueController::calcGravityCompensation()
     } //end while
 }
 
+// void LimbTorqueController::calcInertiaCompensation()
+// {
+//     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+//     while(it != m_lt_param.end()){
+//         LTParam& param = it->second;
+//         if (param.is_active) {
+//             if (DEBUGP) {
+//                 std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+//             }
+//             hrp::JointPathExPtr manip = param.manip;
+//             hrp::Link* tmp_updating_joint = manip->baseLink();
+//             param.gen_inertia_matrix = Eigen::MatrixXd::Zero(manip->numJoints(), manip->numJoints()); //reset
+//             //calculate basic jacobian
+//             Eigen::Vector3d omega, arm, omegaxarm;
+//             Eigen::VectorXd joint_acc(manip->numJoints()), joint_tq(manip->numJoints());
+//             for (int i=0; i<manip->numJoints(); ++i){
+//                 param.basic_jacobians[i] = Eigen::MatrixXd::Zero(6, manip->numJoints()); //reset
+//                 joint_acc(i) = m_robotRef->joint(manip->joint(i)->jointId)->ddq;
+//                 for (int j=0; j<=i; ++j){
+//                     omega = manip->joint(j)->R*manip->joint(j)->a;
+//                     arm = manip->joint(i)->wc - manip->joint(j)->p; //wc is updated in calcGravityCompensation
+//                     omegaxarm = omega.cross(arm);
+//                     param.basic_jacobians[i].col(j) << omegaxarm, omega;
+//                 }
+//                 param.gen_inertia_matrix += param.basic_jacobians[i].transpose() * param.inertia_matrices[i] * param.basic_jacobians[i];
+//             }
+//             joint_tq = param.gen_inertia_matrix * joint_acc;
+//             for (int i=0; i<manip->numJoints(); ++i){
+//                 manip->joint(i)->u += joint_tq(i);
+//             }
+//         }
+//         ++it;
+//     }
+// }
+
 void LimbTorqueController::calcJointDumpingTorque()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
@@ -438,8 +542,9 @@ void LimbTorqueController::calcJointDumpingTorque()
                 hrp::Link* act_joint = manip->joint(i);
                 hrp::Link* ref_joint = m_robotRef->joint(act_joint->jointId);
                 double q_error = act_joint->q - ref_joint->q;
-                double dq_error = act_joint->dq - ref_joint->dq; //inport追加の必要あり
+                double dq_error = act_joint->dq - ref_joint->dq;
                 act_joint->u += -m_lt_param[ee_name].pgain*q_error - m_lt_param[ee_name].dgain*dq_error;
+                //std::cout << "calcJointDumpingGain: act_joint(" << manip->joint(i)->name << ")=" << act_joint->dq << std::endl;
             }}
         ++it;
     }
@@ -464,15 +569,35 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
                     manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
                     if (loop%10 == 0){
-                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i) << " is near limit: " << "max=" << max_angle << ", now=" << now_angle << ", applying min/max avoidance torque." << std::endl;}
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }else if ( (now_angle-margin) <= min_angle) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
                     manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
                     if (loop%10 == 0){
-                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i) << " is near limit: " << "min=" << min_angle << ", now=" << now_angle << ", applying min/max avoidance torque." << std::endl;}
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }
             }
         }
+        ++it;
+    }
+}
+
+//for REF_TORQUE mode
+void LimbTorqueController::addDumpingToRefTorque()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::JointPathExPtr manip = param.manip;
+            std::string ee_name = it->first;
+            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
+                hrp::Link* act_joint = manip->joint(i);
+                act_joint->u += - m_lt_param[ee_name].dgain * act_joint->dq;
+            }}
         ++it;
     }
 }
@@ -533,6 +658,17 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         m_lt_param[name].force_gain = hrp::Vector3(i_param_.force_gain[0], i_param_.force_gain[1], i_param_.force_gain[2]).asDiagonal();
         m_lt_param[name].moment_gain = hrp::Vector3(i_param_.moment_gain[0], i_param_.moment_gain[1], i_param_.moment_gain[2]).asDiagonal();
 
+        //TODO: コントローラがACTIVEの時モード変更できないように制限
+        switch (i_param_.torque_output_type){
+        case OpenHRP::LimbTorqueControllerService::CALC_TORQUE:
+            torque_output_type = CALC_TORQUE;
+            break;
+        case OpenHRP::LimbTorqueControllerService::REF_TORQUE:
+            torque_output_type = REF_TORQUE;
+            break;
+        default: break;
+        }
+
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;
@@ -563,6 +699,25 @@ bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_nam
     }
     copyLimbTorqueControllerParam(i_param_, m_lt_param[i_name_]);
     return true;
+}
+
+void LimbTorqueController::ImpactHandler()
+{
+    //forceInよりm_lt_paramのiteratorについてチェックしたほうがよい
+    //forceはgeteActualParameterで読んでおく?
+    for (unsigned int i=0; i<m_forceIn.size(); i++){
+        if ( m_forceIn[i]->isNew() ) {
+            m_forceIn[i]->read();
+            if (m_force[i].data[2] <= -100.0){
+                std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+                for (int j=0; j<i; ++j) {++it;}
+                std::string ee_name = it->first;
+                m_lt_param[ee_name].pgain = 0.1*default_pgain[i];
+                m_lt_param[ee_name].dgain = 0.1*default_dgain[i];
+            }
+        }
+    }
+    //ゲイン低下からのリリースもしなくてはならない
 }
 
 extern "C"

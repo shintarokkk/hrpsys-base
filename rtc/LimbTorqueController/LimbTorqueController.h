@@ -50,8 +50,12 @@ protected:
 
     RTC::TimedDoubleSeq m_qCurrent;
     RTC::InPort<RTC::TimedDoubleSeq> m_qCurrentIn;
+    RTC::TimedDoubleSeq m_dqCurrent;
+    RTC::InPort<RTC::TimedDoubleSeq> m_dqCurrentIn;
     RTC::TimedDoubleSeq m_qRef;
     RTC::InPort<RTC::TimedDoubleSeq> m_qRefIn;
+    RTC::TimedDoubleSeq m_tqRef;
+    RTC::InPort<RTC::TimedDoubleSeq> m_tqRefIn;
     RTC::TimedPoint3D m_basePos;
     RTC::InPort<RTC::TimedPoint3D> m_basePosIn;
     RTC::TimedOrientation3D m_baseRpy;
@@ -79,6 +83,8 @@ private:
         double pgain, dgain;
         hrp::Vector3 gravitational_acceleration; //重力加速度hrpsys全体のがあればそっちを使う
         hrp::JointPathExPtr manip;  //manipulator?
+        // std::vector<Eigen::MatrixXd> basic_jacobians, inertia_matrices;
+        // Eigen::MatrixXd gen_inertia_matrix;
         bool is_active;
         //TODO
         hrp::Matrix33 force_gain, moment_gain;
@@ -91,13 +97,19 @@ private:
         hrp::Matrix33 localR;
         double pgain, dgain; //for initialization
     };
+    enum {CALC_TORQUE, REF_TORQUE} torque_output_type;
 
     void copyLimbTorqueControllerParam (OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param);
     void getTargetParameters();
     void getActualParameters();
+    void calcLimbInverseDynamics();
     void calcGravityCompensation();
+    //void calcInertiaCompensation();
     void calcJointDumpingTorque();
     void calcMinMaxAvoidanceTorque();
+    void addDumpingToRefTorque();
+
+    void ImpactHandler();
 
     std::map<std::string, LTParam> m_lt_param;
     std::map<std::string, ee_trans> ee_map;
@@ -107,11 +119,11 @@ private:
     hrp::BodyPtr m_robot;
     hrp::BodyPtr m_robotRef;
     coil::Mutex m_mutex;
-    hrp::dvector qold, qoldRef;
+    hrp::dvector qold, qoldRef, dqold, dqoldRef;
     unsigned int m_debugLevel;
     int dummy;
     unsigned int loop;
-    clock_t start, end;
+    std::vector<double> default_pgain, default_dgain;
 };
 
 extern "C"

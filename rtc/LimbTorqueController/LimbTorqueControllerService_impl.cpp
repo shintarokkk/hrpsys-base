@@ -34,6 +34,31 @@ CORBA::Boolean LimbTorqueControllerService_impl::getLimbTorqueControllerParam(co
     return m_limbtorque->getLimbTorqueControllerParam(std::string(i_name_), *i_param_);
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::setCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam &i_param_)
+{
+  return m_limbtorque->setCollisionParam(std::string(i_name_), i_param_);
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::getCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam_out i_param_)
+{
+  return m_limbtorque->getCollisionParam(std::string(i_name_), i_param_);
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::getCollisionTorque(const char *i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_)
+{
+  return m_limbtorque->getCollisionTorque(std::string(i_name_), c_vec_);
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::startLog()
+{
+  return m_limbtorque->startLog();
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::stopLog()
+{
+  return m_limbtorque->stopLog();
+}
+
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)
 {
   m_limbtorque = i_limbtorque;

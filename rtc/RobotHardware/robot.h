@@ -356,6 +356,26 @@ public:
        \return true if set successfully, false otherwise 
      */
     bool setJointControlMode(const char *i_jname, joint_control_mode mode);
+
+    /**
+       \brief set servo gain percentage(0-) of joint
+       \param i_jname joint name, part name or "all"
+       \param i_gname gain name: "pgain", "dgain", "tq_pgain", "tq_dgain"
+       \param i_percentage: gain percentage(0-)
+       \param instant: whether to change gain instantly or not
+       \return true if set successfully, false otherwise 
+     */
+    bool setEachServoGainPercentage(const char *i_jname, const char *i_gname, double i_percentage, bool instant);
+
+    /**
+       \brief set all servo gain percentages(0-) of joint
+       \param i_jname joint name, part name or "all"
+       \param i_percentages: sequence of gain percentages(0-)
+       \param instants: sequence of bools of whether to change gain instantly or not
+       \return true if set successfully, false otherwise 
+     */
+    bool setAllServoGainPercentage(const char *i_jname, const double *i_percentages, const bool *instants);
+
 private:
     /**
        \brief calibrate inertia sensor for one sampling period
@@ -378,6 +398,8 @@ private:
 
     void gain_control();
     void gain_control(int id);
+    void settingoldgains (int i);
+    void settingoldgains_select (int i, const bool* instants);
 
     int inertia_calib_counter, force_calib_counter;
     std::vector<double> gain_counter;
@@ -403,6 +425,13 @@ private:
     std::vector<double> m_commandOld, m_velocityOld;
     hrp::Vector3 G;
     bool m_enable_poweroff_check;
+
+    std::vector<double> acc_gains, vel_gains;
+    std::vector<double> mj_coeff0, mj_coeff3, mj_coeff4, mj_coeff5;
+    std::vector<double> last_ref_torque, last_ref_angle;
+    void calc_minjerk_coeffs(std::vector<double> &coeff0, std::vector<double> &coeff3, std::vector<double> &coeff4, std::vector<double> &coeff5);
+    void init_t2p_gain_transition();
+    void t2p_gain_transition (int now_step);
 };
 
 #endif

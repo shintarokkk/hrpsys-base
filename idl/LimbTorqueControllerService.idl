@@ -12,6 +12,7 @@ module OpenHRP
     typedef sequence<double> DblSequence;
     typedef sequence<string> StrSequence;
     typedef sequence<sequence<double, 3> > Dbl3Sequence;
+    typedef sequence<sequence<double> > DblMatrix;
 
     /**
      * @enum ControllerMode
@@ -35,15 +36,29 @@ module OpenHRP
      * @struct limbtorqueParam
      * @brief Limb torque controller parameters for one end-effector.
      */
-      struct limbtorqueParam {
-          double Pgain;
-          double Dgain;
-          ControllerMode controller_mode;
-          TorqueOutputType torque_output_type;
-          //TODO
-          DblSequence3 force_gain;
-          DblSequence3 moment_gain;
-      };
+    struct limbtorqueParam {
+        double Pgain;
+        double Dgain;
+        ControllerMode controller_mode;
+        TorqueOutputType torque_output_type;
+        //TODO
+        DblSequence3 force_gain;
+        DblSequence3 moment_gain;
+    };
+
+    /**
+     * @struct collisionParam
+     * @brief collision parameters for one end-effector.
+     */
+    struct collisionParam {
+        DblSequence Thresh;
+        double Cgain;
+        double Rgain;
+        boolean Handle;
+        long MaxCount;
+        boolean TestB1;
+        long TestI1;
+    };
 
       /**
        * @brief start limb torque controller
@@ -74,6 +89,42 @@ module OpenHRP
      * @return true if set successfully, false otherwise
      */
     boolean getLimbTorqueControllerParam(in string name, out limbtorqueParam i_param);
+
+    /**
+     * @brief set collision parameters.
+     * @param i_param input new collision parameters
+     * @param name collision param's name, which basically corresponds to force sensor name
+     * @return true if set successfully, false otherwise
+     */
+    boolean setCollisionParam(in string name, in collisionParam i_param);
+
+    /**
+     * @brief get collision parameters.
+     * @param i_param ouput collision parameters
+     * @param name collision param's name, which basically corresponds to force sensor name
+     * @return true if set successfully, false otherwise
+     */
+    boolean getCollisionParam(in string name, out collisionParam i_param);
+
+    /**
+     * @brief get output of collision detector.
+     * @param name limb torque controller param's name, which basically corresponds to force sensor name
+     * @param c_vector torque vector
+     * @return true if got successfully, false otherwise
+     */
+    boolean getCollisionTorque(in string name, out DblSequence c_vector);
+
+    /**
+     * @brief start spitting log
+     * @return true if got successfully, false otherwise
+     */
+    boolean startLog();
+
+    /**
+     * @brief stop spitting log
+     * @return true if got successfully, false otherwise
+     */
+    boolean stopLog();
 
   };
 };

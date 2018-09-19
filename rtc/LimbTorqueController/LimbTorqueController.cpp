@@ -6,8 +6,10 @@
 #include "../ImpedanceController/JointPathEx.h"
 #include <hrpModel/JointPath.h>
 #include <hrpUtil/Eigen3d.h>
+#include <hrpUtil/MatrixSolvers.h>
 
 #include "../RobotHardware/RobotHardwareService_impl.h"
+#include <sys/time.h>
 
 typedef coil::Guard<coil::Mutex> Guard;
 
@@ -17,6 +19,7 @@ typedef coil::Guard<coil::Mutex> Guard;
 #ifndef rad2deg
 #define rad2deg(rad) (rad * 180 / M_PI)
 #endif
+#define RTC_PERIOD 0.002 //[sec]
 
 // Module specification
 // <rtc-template block="module_spec">
@@ -34,8 +37,8 @@ static const char* limbtorquecontroller_spec[] =
         "lang_type",         "compile",
         // Configuration variables
         "conf.default.debugLevel", "0",
-        "conf.default.pgain", "1000",
-        "conf.default.dgain", "1000",
+        "conf.default.pgain", "10",
+        "conf.default.dgain", "3",
         ""
     };
 // </rtc-template>
@@ -44,6 +47,7 @@ LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
     : RTC::DataFlowComponentBase(manager),
       m_qCurrentIn("qCurrent", m_qCurrent), //センサ値:重力補償用
       m_dqCurrentIn("dqCurrent", m_dqCurrent),
+      m_tqCurrentIn("tqCurrent", m_tqCurrent), //actual torque
       m_qRefIn("qRef", m_qRef),
       m_tqRefIn("tqRef", m_tqRef),
       m_basePosIn("basePosIn", m_basePos), //eus等からのref値
@@ -71,6 +75,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 
     addInPort("qCurrent", m_qCurrentIn);
     addInPort("dqCurrent", m_dqCurrentIn);
+    addInPort("tqCurrent", m_tqCurrentIn);
     addInPort("qRef", m_qRefIn);
     addInPort("tqRef", m_tqRefIn);
     addInPort("basePosIn", m_basePosIn);
@@ -152,10 +157,10 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     }
     unsigned int dof = m_robot->numJoints();
     for ( unsigned int i = 0 ; i < dof; i++ ){
-      if ( (int)i != m_robot->joint(i)->jointId ) {
-        std::cerr << "[" << m_profile.instance_name << "] jointId is not equal to the index number" << std::endl;
-        return RTC::RTC_ERROR;
-      }
+        if ( (int)i != m_robot->joint(i)->jointId ) {
+            std::cerr << "[" << m_profile.instance_name << "] jointId is not equal to the index number" << std::endl;
+            return RTC::RTC_ERROR;
+        }
     }
     torque_output_type = CALC_TORQUE;
 
@@ -163,36 +168,71 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     coil::vstring end_effectors_str = coil::split(prop["end_effectors"], ",");
     coil::vstring ltc_pgain_str = coil::split(prop["ltc_pgain"], ",");
     coil::vstring ltc_dgain_str = coil::split(prop["ltc_dgain"], ",");
+    coil::vstring ltc_cgain_str = coil::split(prop["ltc_cgain"], ",");
+    coil::vstring ltc_rgain_str = coil::split(prop["ltc_rgain"], ",");
+    coil::vstring ltc_collision_threshold_raw = coil::split(prop["ltc_collision_threshold"], "|"); //エンドエフェクタ毎に"|"で区切ってもらう
     std::map<std::string, std::string> base_name_map;
     if (end_effectors_str.size() > 0) {
         size_t prop_num = 10; //the number of parameters of each end effector in conf file: "ee-name, ee-link-name, base-link-name, pos.x, pos.y, pos.z, rot-axis,x, rot-axis.y, rot-axis.z, rot-angle"
         size_t num = end_effectors_str.size()/prop_num;
         default_pgain.resize(num);
         default_dgain.resize(num);
+        default_cgain.resize(num);
+        default_rgain.resize(num);
         for (size_t i = 0; i < num; i++) {
             std::string ee_name, ee_target, ee_base;
-            double conf_pgain, conf_dgain;
+            double conf_pgain, conf_dgain, conf_cgain, conf_rgain;
+            hrp::dmatrix one_gen_imat, one_old_gen_imat, one_gen_mom_observer_gain, one_collision_resistance_gain;
+            hrp::dvector one_gen_mom, one_old_gen_mom, one_gen_mom_res;
+            hrp::dvector one_accum_tau, one_accum_beta, one_accum_res, one_initial_gen_mom;
+            hrp::dvector one_collision_threshold;
+            hrp::dvector one_resist_of_one_step_before;
+
             coil::stringTo(ee_name, end_effectors_str[i*prop_num].c_str());
             coil::stringTo(ee_target, end_effectors_str[i*prop_num+1].c_str());
             coil::stringTo(ee_base, end_effectors_str[i*prop_num+2].c_str());
             coil::stringTo(conf_pgain, ltc_pgain_str[i].c_str());
             coil::stringTo(conf_dgain, ltc_dgain_str[i].c_str());
+            coil::stringTo(conf_cgain, ltc_cgain_str[i].c_str());
+            coil::stringTo(conf_rgain, ltc_rgain_str[i].c_str());
+            coil::vstring collision_threshold_str_for_one_ee = coil::split(ltc_collision_threshold_raw[i], ",");
+            one_collision_threshold.resize(collision_threshold_str_for_one_ee.size());
+            for (unsigned int j=0; j<collision_threshold_str_for_one_ee.size(); ++j){
+                coil::stringTo(one_collision_threshold[j], collision_threshold_str_for_one_ee[j].c_str());
+            }
             ee_trans eet;
             for (size_t j = 0; j < 3; j++) {
                 coil::stringTo(eet.localPos(j), end_effectors_str[i*prop_num+3+j].c_str());
             }
-            double tmpv[4];  ///tmpvとは?
+            double tmpv[4];
             for (int j = 0; j < 4; j++ ) {
                 coil::stringTo(tmpv[j], end_effectors_str[i*prop_num+6+j].c_str());
             }
             eet.localR = Eigen::AngleAxis<double>(tmpv[3], hrp::Vector3(tmpv[0], tmpv[1], tmpv[2])).toRotationMatrix(); // rotation in VRML is represented by axis + angle
             eet.target_name = ee_target;
-            eet.pgain = conf_pgain;
-            eet.dgain = conf_dgain;
+            // eet.pgain = conf_pgain;
+            // eet.dgain = conf_dgain;
+            // eet.cgain = conf_cgain;
             default_pgain[i] = conf_pgain;
             default_dgain[i] = conf_dgain;
+            default_cgain[i] = conf_cgain;
+            default_rgain[i] = conf_rgain;
             ee_map.insert(std::pair<std::string, ee_trans>(ee_name , eet));
             base_name_map.insert(std::pair<std::string, std::string>(ee_name, ee_base));
+            gen_imat.insert(std::pair<std::string, hrp::dmatrix>(ee_name, one_gen_imat));
+            old_gen_imat.insert(std::pair<std::string, hrp::dmatrix>(ee_name, one_old_gen_imat));
+            gen_mom_observer_gain.insert(std::pair<std::string, hrp::dmatrix>(ee_name, one_gen_mom_observer_gain));
+            collision_resistance_gain.insert(std::pair<std::string, hrp::dmatrix>(ee_name, one_collision_resistance_gain));
+            gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_gen_mom));
+            old_gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_old_gen_mom));
+            gen_mom_res.insert(std::pair<std::string, hrp::dvector>(ee_name, one_gen_mom_res));
+            accum_tau.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_tau));
+            accum_beta.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_beta));
+            accum_res.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_res));
+            collision_p.insert(std::pair<std::string, bool>(ee_name, false));
+            default_collision_threshold.insert(std::pair<std::string, hrp::dvector>(ee_name, one_collision_threshold));
+            initial_gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_initial_gen_mom));
+            resist_of_one_step_before.insert(std::pair<std::string, hrp::dvector>(ee_name, one_resist_of_one_step_before));
             std::cerr << "[" << m_profile.instance_name << "] End Effector [" << ee_name << "]" << ee_target << " " << ee_base << std::endl;
             std::cerr << "[" << m_profile.instance_name << "]   target = " << ee_target << ", base = " << ee_base << std::endl;
             std::cerr << "[" << m_profile.instance_name << "]   localPos = " << eet.localPos.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "    [", "]")) << "[m]" << std::endl;
@@ -218,7 +258,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 1. Check whether adequate ee_map exists for the sensor.
         std::string ee_name;
-        double eet_pgain, eet_dgain;
+        // double eet_pgain, eet_dgain;
         bool is_ee_exists = false;
         for ( std::map<std::string, ee_trans>::iterator it = ee_map.begin(); it != ee_map.end(); ++it ) {
             hrp::Link* alink = m_robot->link(it->second.target_name);
@@ -227,8 +267,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
                 if ( alink->name == sensor_link_name ) {
                     is_ee_exists = true;
                     ee_name = it->first;
-                    eet_pgain = it->second.pgain;
-                    eet_dgain = it->second.dgain;
+                    // eet_pgain = it->second.pgain;
+                    // eet_dgain = it->second.dgain;
                 }
                 alink = alink->parent;
             }
@@ -239,6 +279,10 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 2. Check whether already limb torque param exists, which has the same target link as the sensor.
         if (m_lt_param.find(ee_name) != m_lt_param.end()) {
+            std::cerr << "[" << m_profile.instance_name << "]   Already limb torque param (target_name=" << sensor_link_name << ", ee_name=" << ee_name << ") exists!!. Limb torque param for " << sensor_name << " cannot be added!!" << std::endl;
+            continue;
+        }
+        if (m_lt_col_param.find(ee_name) != m_lt_col_param.end()) {
             std::cerr << "[" << m_profile.instance_name << "]   Already limb torque param (target_name=" << sensor_link_name << ", ee_name=" << ee_name << ") exists!!. Limb torque param for " << sensor_name << " cannot be added!!" << std::endl;
             continue;
         }
@@ -265,13 +309,27 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(1),
         //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(2);
         // }
+
         // 4. Set limb torque param
         p.sensor_name = sensor_name;
-        p.pgain = eet_pgain;
-        p.dgain = eet_dgain;
+        //現状すべてのlimbに同じ(最初の)ゲインを設定している
+        p.pgain = default_pgain[0];
+        p.dgain = default_dgain[0];
         p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
         m_lt_param[ee_name] = p;
-        std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee-link = " << target_link->name << std::endl;
+
+        //set collision param
+        CollisionParam col_p;
+        col_p.cgain = default_cgain[0];
+        col_p.resist_gain = default_rgain[0];
+        col_p.collision_threshold = default_collision_threshold[ee_name];
+        col_p.collisionhandle_p = false;
+        col_p.test_bool1 = false;
+        col_p.test_int1 = 0;
+        col_p.max_collision_uncheck_count = 1000;
+        m_lt_col_param[ee_name] = col_p;
+
+        std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
 
     std::vector<std::pair<hrp::Link*, hrp::Link*> > interlocking_joints;
@@ -281,6 +339,51 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             std::cerr << "[" << m_profile.instance_name << "] Interlocking Joints for [" << it->first << "]" << std::endl;
             it->second.manip->setInterlockingJointPairIndices(interlocking_joints, std::string(m_profile.instance_name));
         }
+    }
+    //initiate variables for CollisionDetector
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        gen_mom[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        old_gen_mom[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        gen_mom_res[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        accum_tau[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        accum_beta[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        accum_res[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        initial_gen_mom[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        resist_of_one_step_before[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
+        ++it;
+    }
+    std::map<std::string, CollisionParam>::iterator c_it = m_lt_col_param.begin();
+    while(c_it != m_lt_col_param.end()){
+        std::string ee_name = c_it->first;
+        CollisionParam& param = c_it->second;
+        hrp::dvector temp_gains = hrp::dvector::Constant(m_lt_param[ee_name].manip->numJoints(), param.cgain);
+        hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[ee_name].manip->numJoints(), param.resist_gain);
+        gen_mom_observer_gain[ee_name] = temp_gains.asDiagonal();
+        collision_resistance_gain[ee_name] = temp_rgains.asDiagonal();
+        collision_p[ee_name] = false;
+        ++c_it;
+    }
+
+    link_inertia_matrix.resize(dof);
+    for ( unsigned int i = 0 ; i < dof; i++ ){
+        link_inertia_matrix[i] = hrp::dmatrix::Zero(6,6);
+        hrp::Vector3 RotorInertia = hrp::dvector::Constant(3, m_robot->joint(i)->Jm2);
+        hrp::Matrix33 RotorInertiaMat = RotorInertia.asDiagonal();
+        // std::cout << "Link Inertia(" << i << ") is " <<std::endl;
+        // std::cout << m_robot->joint(i)->I << std::endl;
+        hrp::Matrix33 TotalInertia = m_robot->joint(i)->I + RotorInertiaMat;
+        // std::cout << "Total Inertia(" << i << ") is " <<std::endl;
+        // std::cout << TotalInertia << std::endl;
+        link_inertia_matrix[i] <<
+            m_robot->joint(i)->m, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, m_robot->joint(i)->m, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, m_robot->joint(i)->m, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, TotalInertia.row(0),
+            0.0, 0.0, 0.0, TotalInertia.row(1),
+            0.0, 0.0, 0.0, TotalInertia.row(2);
     }
 
     // allocate memory for outPorts
@@ -294,7 +397,13 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         qoldRef[i] = 0.0;
         dqoldRef[i] = 0.0;
     }
+    actual_torque_vector.resize(dof);
     loop = 0;
+
+    collision_detector_initialized = false;
+    gen_imat_initialized = false;
+    collision_uncheck_count = 0;
+    spit_log = false;
 
     return RTC::RTC_OK;
 }
@@ -333,6 +442,9 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
    if (m_dqCurrentIn.isNew()) {
        m_dqCurrentIn.read();
    }
+   if (m_tqCurrentIn.isNew()) {
+       m_tqCurrentIn.read();
+   }
    if (m_qRefIn.isNew()) {
        m_qRefIn.read();
    }
@@ -351,20 +463,21 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 
    if ( m_qRef.data.length() ==  m_robot->numJoints() &&
         m_qCurrent.data.length() ==  m_robot->numJoints() &&
-        m_dqCurrent.data.length() == m_robot->numJoints()) {
+        m_dqCurrent.data.length() == m_robot->numJoints() &&
+        m_tqCurrent.data.length() == m_robot->numJoints()) {
        getTargetParameters(); //上位から来るref値を変数にセット
        getActualParameters(); //センサ値を変数にセット
-
-       //ImpactHandler();
 
        if (torque_output_type == CALC_TORQUE) {
            //参照トルク計算
            //以下の関数内部で各joint->uにトルクを加算していく
            //calcGravityCompensation(); //重力補償
            //calcInertiaCompensation();
+
            calcLimbInverseDynamics();
            calcJointDumpingTorque(); //関節角度ダンピング
            calcMinMaxAvoidanceTorque();
+
            //データの記述?
            //Write Outport
        }
@@ -372,20 +485,44 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        //     addDumpingToRefTorque();
        // }
 
-       //std::cout << "m_tq=[";
+       if(m_lt_col_param["rarm"].test_int1 == 2){
+           SimpleCollisionDetector();
+       }
+       else{
+           CollisionDetector();
+       }
+       CollisionHandler();
+
+       // if(loop%20000==10000){
+       //     exec_time1 = get_dtime();
+       // }
+       // if(loop%20000==0){
+       //     exec_time2 = get_dtime();
+       //     std::cout << std::endl << std::endl;
+       //     std::cout << "Time for 10000 loop: " << exec_time2 - exec_time1 << std::endl;
+       //     std::cout << std::endl << std::endl;
+       // }
+
+       if(spit_log){
+           DebugOutput();
+       }
+
        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
-           m_q.data[i] = m_robotRef->joint(i)->q; //same as input qRef at this moment
+           m_q.data[i] = m_robotRef->joint(i)->q;
            m_tq.data[i] = m_robot->joint(i)->u;
-           // printf("%3.2lf",m_tq.data[i]);
-           // if( i==m_robot->numJoints()-1){
-           //     printf("]\n");
-           // }else{
-           //     printf(", ");
-           // }
        }
 
        m_qOut.write();
        m_tqOut.write();
+   }
+
+
+   if (loop%1000 == 0){
+       std::cout << "[ltc] torque ref is: [";
+       for ( size_t i = 0; i<m_robot->numJoints(); ++i){
+           std::cout << m_tq.data[i] << ", ";
+       }
+       std::cout << "]" << std::endl;
    }
 
    return RTC::RTC_OK;
@@ -415,6 +552,7 @@ void LimbTorqueController::getActualParameters()
         //m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0;
         m_robot->joint(i)->dq = m_dqCurrent.data[i];
         m_robot->joint(i)->ddq = m_robotRef->joint(i)->ddq; //TODO
+        actual_torque_vector(i) = m_tqCurrent.data[i];
         if (torque_output_type != REF_TORQUE){
             m_robot->joint(i)->u = 0;
         }
@@ -447,13 +585,16 @@ void LimbTorqueController::calcLimbInverseDynamics()
             }
             hrp::Link* base_link = param.manip->baseLink();
             Eigen::MatrixXd base_rot = base_link->R;
-            //TODO: set out f, tau
             hrp::Vector3 out_f, out_tau;
             out_f = Eigen::Vector3d::Zero(3);
             out_tau = Eigen::Vector3d::Zero(3);
             //TODO: acceleration of baseLink due to fullbody movement
-            base_link->dvo = base_rot * param.gravitational_acceleration;
-            base_link->dw.setZero();
+            if (base_link->parent){
+                base_link->parent->dvo = base_rot * param.gravitational_acceleration;
+            } else{
+                base_link->dvo = base_rot * param.gravitational_acceleration;
+            }
+            //base_link->dw.setZero();
             m_robot->calcInverseDynamics(base_link, out_f, out_tau);
         }
         ++it;
@@ -565,15 +706,15 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                 double now_angle = manip->joint(i)->q;
                 double max_angle = manip->joint(i)->ulimit;
                 double min_angle = manip->joint(i)->llimit;
-                if ( (now_angle+margin) >= max_angle) {
+                if ( (now_angle+margin) >= max_angle ) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
                     manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
-                    if (loop%10 == 0){
+                    if (loop%500 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }else if ( (now_angle-margin) <= min_angle) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
                     manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
-                    if (loop%10 == 0){
+                    if (loop%500 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }
             }
@@ -701,23 +842,81 @@ bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_nam
     return true;
 }
 
-void LimbTorqueController::ImpactHandler()
+bool LimbTorqueController::setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_)
 {
-    //forceInよりm_lt_paramのiteratorについてチェックしたほうがよい
-    //forceはgeteActualParameterで読んでおく?
-    for (unsigned int i=0; i<m_forceIn.size(); i++){
-        if ( m_forceIn[i]->isNew() ) {
-            m_forceIn[i]->read();
-            if (m_force[i].data[2] <= -100.0){
-                std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-                for (int j=0; j<i; ++j) {++it;}
-                std::string ee_name = it->first;
-                m_lt_param[ee_name].pgain = 0.1*default_pgain[i];
-                m_lt_param[ee_name].dgain = 0.1*default_dgain[i];
-            }
-        }
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_col_param.find(name) == m_lt_col_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << name << "]" << std::endl;
+        return false;
     }
-    //ゲイン低下からのリリースもしなくてはならない
+
+    std::cerr << "[" << m_profile.instance_name << "] Update collision parameters" << std::endl;
+
+    for (unsigned int i=0; i<m_lt_col_param[name].collision_threshold.size(); ++i){
+        m_lt_col_param[name].collision_threshold[i] = i_param_.Thresh[i];
+    }
+    m_lt_col_param[name].cgain = i_param_.Cgain;
+    m_lt_col_param[name].resist_gain = i_param_.Rgain;
+    m_lt_col_param[name].collisionhandle_p = i_param_.Handle;
+    m_lt_col_param[name].max_collision_uncheck_count = i_param_.MaxCount;
+    m_lt_col_param[name].test_bool1 = i_param_.TestB1;
+    m_lt_col_param[name].test_int1 = i_param_.TestI1;
+
+    hrp::dvector temp_gains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].cgain);
+    hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].resist_gain);
+    gen_mom_observer_gain[name] = temp_gains.asDiagonal();
+    collision_resistance_gain[name] = temp_rgains.asDiagonal();
+
+    std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]  Collision Checking Threshold : " << m_lt_col_param[name].collision_threshold.transpose() << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Cgain : " << m_lt_col_param[name].cgain << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Rgain : " << m_lt_col_param[name].resist_gain << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]       handle colision or not : " << m_lt_col_param[name].collisionhandle_p << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]      max collision uncheck count(uncheck time = count*hrpsys_periodic_rate) : " << m_lt_col_param[name].max_collision_uncheck_count << std::endl;
+    return true;
+}
+
+void LimbTorqueController::copyCollisionParam(LimbTorqueControllerService::collisionParam& i_param_, const CollisionParam& param)
+{
+    for (size_t i=0; i<param.collision_threshold.size(); ++i){
+        i_param_.Thresh[i] = param.collision_threshold[i];
+    }
+    i_param_.Cgain = param.cgain;
+    i_param_.Rgain = param.resist_gain;
+    i_param_.Handle = param.collisionhandle_p;
+    i_param_.MaxCount = param.max_collision_uncheck_count;
+    i_param_.TestB1 = param.test_bool1;
+    i_param_.TestI1 = param.test_int1;
+}
+
+bool LimbTorqueController::getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_)
+{
+    if ( m_lt_col_param.find(i_name_) == m_lt_col_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << i_name_ << "]" << std::endl;
+        i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
+        copyCollisionParam(*i_param_, CollisionParam());
+        return false;
+    }
+    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
+    i_param_->Thresh.length(m_lt_col_param[i_name_].collision_threshold.size());
+    copyCollisionParam(*i_param_, m_lt_col_param[i_name_]);
+    return true;
+}
+
+bool LimbTorqueController::getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_)
+{
+    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
+        return false;
+    }
+    c_vec_ = new OpenHRP::LimbTorqueControllerService::DblSequence;
+    c_vec_->length(gen_mom_res[i_name_].size());
+    for (size_t i=0; i<gen_mom_res[i_name_].size(); ++i){
+        c_vec_[i] = gen_mom_res[i_name_](i);
+    }
+    return true;
 }
 
 extern "C"
@@ -730,3 +929,303 @@ extern "C"
                                  RTC::Delete<LimbTorqueController>);
     }
 };
+
+void LimbTorqueController::CollisionDetector()
+{
+    int dof = m_robot->numJoints();
+    hrp::dvector dq_backup(dof), ddq_backup(dof), tq_backup(dof);
+    for (unsigned int i=0; i<dof; ++i){
+        dq_backup[i] = m_robot->joint(i)->dq;
+        ddq_backup[i] = m_robot->joint(i)->ddq;
+        tq_backup[i] = m_robot->joint(i)->u;
+    }
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            calcGeneralizedInertiaMatrix(it);
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            hrp::Link* base_link = manip->baseLink();
+            hrp::dmatrix base_rot = base_link->R;
+            hrp::Vector3 out_f, out_tau;
+            out_f = hrp::Vector3::Zero(3);
+            out_tau = hrp::Vector3::Zero(3);
+            base_link->dvo = base_rot * param.gravitational_acceleration;
+            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+            for (unsigned int i=0; i<limbdof; ++i){
+                manip->joint(i)->ddq = 0.0;
+            }
+            hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
+            hrp::dmatrix  inertia_dot;
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+            for (unsigned int i=0; i<limbdof; ++i){
+                c_and_g(i) = manip->joint(i)->u;
+                q_dot(i) = dq_backup[manip->joint(i)->jointId];
+            }
+            hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
+            hrp::dmatrix time_matrix = time_vector.asDiagonal();
+            inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
+            beta = c_and_g - inertia_dot*q_dot;
+            for (unsigned int i=0; i<limbdof; ++i){
+                manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
+                manip->joint(i)->dq = 0.0;
+            }
+            base_link->dvo.setZero();
+            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+            out_f = hrp::Vector3::Zero(3);
+            out_tau = hrp::Vector3::Zero(3);
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+            for (unsigned int i=0; i<limbdof; ++i){
+                gen_mom[ee_name](i) = manip->joint(i)->u;
+                mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+            }
+            if (!collision_detector_initialized){
+                //old_gen_mom[ee_name] = gen_mom[ee_name];
+                initial_gen_mom[ee_name] = gen_mom[ee_name];
+                collision_detector_initialized = true;
+            }
+            // use command torque
+            if (m_lt_col_param[ee_name].test_int1 == 0){
+                accum_tau[ee_name] += mot_tq*RTC_PERIOD;
+                if(collision_uncheck_count > 0 && m_lt_col_param[ee_name].test_bool1){
+                    accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
+                }
+            }
+            //use sensor torque
+            else if (m_lt_col_param[ee_name].test_int1 == 1){
+                accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD;
+            }
+            accum_beta[ee_name] += beta*RTC_PERIOD;
+            accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
+            //calc residual (need filter?)
+            gen_mom_res[ee_name]
+                = gen_mom_observer_gain[ee_name]
+                * (gen_mom[ee_name] - initial_gen_mom[ee_name]
+                   - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
+                   );
+
+            for (int i=limbdof-1; i>=0; --i) {
+                if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count == 0) && m_lt_col_param[ee_name].collisionhandle_p ){
+                    collision_p[ee_name] = true;
+                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                    std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
+                    break;
+                }
+            }
+            // if (loop%100 == 0){
+            //     // if (loop%1000==0){
+            //     //     std::cout << "CollisionDetector: residual is ... "  << std::endl << gen_mom_res[ee_name] << std::endl;
+            //     // }
+            //     struct timeval nowtime;
+            //     gettimeofday(&nowtime, NULL);
+            //     debugmom << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugtau << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugbet << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugares << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugres << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     for (unsigned int i=0; i<limbdof; ++i){
+            //         debugmom << " " << gen_mom[ee_name](i);
+            //         debugtau << " " << accum_tau[ee_name](i);
+            //         debugbet << " " << accum_res[ee_name](i);
+            //         debugares << " " << accum_res[ee_name](i);
+            //         debugres << " " << gen_mom_res[ee_name](i);
+            //     }
+            //     debugmom << std::endl;
+            //     debugtau << std::endl;
+            //     debugbet << std::endl;
+            //     debugares << std::endl;
+            //     debugres << std::endl;
+            // }
+        }
+        ++it;
+    }
+    for (unsigned int i=0; i<dof; ++i){
+        m_robot->joint(i)->dq = dq_backup[i];
+        m_robot->joint(i)->ddq = ddq_backup[i];
+        m_robot->joint(i)->u = tq_backup[i];
+    }
+}
+
+void LimbTorqueController::calcGeneralizedInertiaMatrix(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::Vector3 omega, arm, omegaxarm;
+    int limbdof = manip->numJoints();
+    if(gen_imat_initialized){
+        old_gen_imat[ee_name] = gen_imat[ee_name];
+    }
+    gen_imat[ee_name] = hrp::dmatrix::Zero(limbdof, limbdof);
+    //calculate basic jacobian
+    std::vector<hrp::dmatrix> basic_jacobians;
+    basic_jacobians.resize(limbdof);
+    for (int i=0; i<limbdof; ++i){
+        //basic_jacobians[i] = Eigen::MatrixXd::Zero(6, limbdof);
+        manip->joint(i)->wc = manip->joint(i)->p + manip->joint(i)->R*manip->joint(i)->c;
+        basic_jacobians[i] =  hrp::dmatrix::Zero(6, limbdof);
+        for (int j=0; j<=i; ++j){
+            omega = manip->joint(j)->R * manip->joint(j)->a; //unit vector of joint axis direction
+            arm = manip->joint(i)->wc - manip->joint(j)->p;
+            omegaxarm = omega.cross(arm);
+            basic_jacobians[i].col(j) << omegaxarm, omega;
+        }
+        gen_imat[ee_name] += basic_jacobians[i].transpose() * link_inertia_matrix[manip->joint(i)->jointId] * basic_jacobians[i];
+    }
+    if (!gen_imat_initialized){
+        old_gen_imat[ee_name] = gen_imat[ee_name];
+        gen_imat_initialized = true;
+    }
+}
+
+void LimbTorqueController::CollisionHandler()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        hrp::JointPathExPtr manip = param.manip;
+        if (param.is_active && m_lt_col_param[ee_name].collisionhandle_p) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            if(collision_p[ee_name]){
+                collision_p[ee_name] = false;
+                collision_uncheck_count = m_lt_col_param[ee_name].max_collision_uncheck_count;
+            }
+            if(collision_uncheck_count > 0){
+                hrp::dvector collision_resistance_torque = - collision_resistance_gain[ee_name] * gen_mom_res[ee_name];
+                for (int i=0; i<manip->numJoints(); ++i){
+                    manip->joint(i)->u += collision_resistance_torque(i);
+                }
+                resist_of_one_step_before[ee_name] = collision_resistance_torque;
+                //hrp::dmatrix contact_jacobian(6, manip->numJoints()), inv_j(manip->numJoints(), 6);
+                // manip->calcJacobian(contact_jacobian);
+                // hrp::calcPseudoInverse(contact_jacobian.transpose(), inv_j);
+                // hrp::dvector external_force;
+                // external_force = inv_j * gen_mom_res[ee_name];
+                // if (collision_uncheck_count%200 == 0){
+                //     std::cout << "外力は ";
+                //     std::cout << external_force.transpose() << std::endl;
+                // }
+                --collision_uncheck_count;
+            }
+            if(collision_uncheck_count == 0){
+                resist_of_one_step_before[ee_name] = hrp::dvector::Zero(manip->numJoints());
+            }
+        }
+        it++;
+    }
+}
+
+void LimbTorqueController::DebugOutput()
+{
+    if (loop%3 == 0){
+        std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        hrp::JointPathExPtr manip = param.manip;
+        int limbdof = manip->numJoints();
+        struct timeval nowtime;
+        gettimeofday(&nowtime, NULL);
+        debug_res << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_reftq << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_f << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_mom << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_actau << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_acbet << nowtime.tv_sec << "." << nowtime.tv_usec;
+        debug_acres << nowtime.tv_sec << "." << nowtime.tv_usec;
+        hrp::dvector external_force = hrp::dvector::Zero(6);
+        //calc external force
+        hrp::dmatrix contact_jacobian(6, manip->numJoints()), inv_j(manip->numJoints(), 6);
+        manip->calcJacobian(contact_jacobian);
+        hrp::calcPseudoInverse(contact_jacobian.transpose(), inv_j);
+        external_force = inv_j * gen_mom_res[ee_name];
+
+        for (unsigned int i=0; i<limbdof; ++i){
+            debug_res << " " << gen_mom_res[ee_name](i);
+            debug_reftq << " " << manip->joint(i)->u;
+            debug_mom << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
+            debug_actau << " " << accum_tau[ee_name](i);
+            debug_acbet << " " << accum_beta[ee_name](i);
+            debug_acres << " " << accum_res[ee_name](i);
+        }
+        for (unsigned int i=0; i<6; ++i){
+            debug_f << " " << external_force(i);
+        }
+        debug_res << std::endl;
+        debug_reftq << std::endl;
+        debug_f << std::endl;
+        debug_mom << std::endl;
+        debug_actau << std::endl;
+        debug_acbet << std::endl;
+        debug_acres << std::endl;
+    }
+}
+
+// double LimbTorqueController::get_dtime(){
+//     struct timeval tv;
+//     gettimeofday(&tv, NULL);
+//     return ((double)(tv.tv_sec) + (double)(tv.tv_usec)*0.001*0.001);
+// }
+
+void LimbTorqueController::SimpleCollisionDetector()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            hrp::dvector mot_tq(limbdof);
+            for (unsigned int i=0; i<limbdof; ++i){
+                mot_tq(i) = manip->joint(i)->u;
+            }
+            gen_mom_res[ee_name] = mot_tq - actual_torque_vector;
+            for (int i=limbdof-1; i>=0; --i) {
+                if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count == 0) && m_lt_col_param[ee_name].collisionhandle_p ){
+                    collision_p[ee_name] = true;
+                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                    std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
+                    break;
+                }
+            }
+        }
+        ++it;
+    }
+}
+
+bool LimbTorqueController::startLog()
+{
+    debug_mom.open(std::string("/home/leus/tmp/CollisionDebug/gen_mom.dat").c_str());
+    debug_actau.open(std::string("/home/leus/tmp/CollisionDebug/ac_tau.dat").c_str());
+    debug_acbet.open(std::string("/home/leus/tmp/CollisionDebug/ac_beta.dat").c_str());
+    debug_acres.open(std::string("/home/leus/tmp/CollisionDebug/ac_res.dat").c_str());
+    debug_res.open(std::string("/home/leus/tmp/CollisionDebug/res.dat").c_str());
+    debug_reftq.open(std::string("/home/leus/tmp/CollisionDebug/ref_tq.dat").c_str());
+    debug_f.open(std::string("/home/leus/tmp/CollisionDebug/ext_f.dat").c_str());
+    spit_log = true;
+}
+
+bool LimbTorqueController::stopLog()
+{
+    debug_mom.close();
+    debug_actau.close();
+    debug_acbet.close();
+    debug_acres.close();
+    debug_res.close();
+    debug_reftq.close();
+    debug_f.close();
+    spit_log = false;
+}

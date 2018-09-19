@@ -50,6 +50,8 @@ public:
     void enableDisturbanceObserver();
     void disableDisturbanceObserver();
     void setDisturbanceObserverGain(::CORBA::Double gain);
+    void setEachServoGainPercentage(const char* jname, const char* gname, ::CORBA::Double percentage, ::CORBA::Boolean instant){};
+    void setAllServoGainPercentage(const char *jname, const ::OpenHRP::RobotHardwareService::DblSequence& percentages, const ::OpenHRP::RobotHardwareService::BoolSequence& instants){};
     void setRobot(BodyRTC *i_robot);
 private:
     BodyRTC *m_robot;

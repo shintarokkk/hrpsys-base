@@ -40,6 +40,9 @@ public:
     void disableDisturbanceObserver();
     void setDisturbanceObserverGain(::CORBA::Double gain);
     void setJointControlMode(const char *jname, OpenHRP::RobotHardwareService::JointControlMode jcm);
+    //void setEachServoGainPercentage(const char* jname, const char* gname, double limit);
+    void setEachServoGainPercentage(const char* jname, const char* gname, double percentage, bool instant);
+    void setAllServoGainPercentage(const char *jname, const ::OpenHRP::RobotHardwareService::DblSequence& percentages, const ::OpenHRP::RobotHardwareService::BoolSequence& instants);
     //
     void setRobot(boost::shared_ptr<robot>& i_robot) { m_robot = i_robot; }
 private:

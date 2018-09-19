@@ -25,6 +25,7 @@ module OpenHRP
     typedef sequence<long>   LongSequence;
     typedef sequence<string> StrSequence;
     typedef sequence<LongSequence>  LongSequenceSequence;
+    typedef sequence<boolean>   BoolSequence;
 
     typedef double DblArray3[3];
     typedef double DblArray6[6];
@@ -261,6 +262,22 @@ module OpenHRP
      * @param jcm   joint control mode
      */
     void setJointControlMode(in string jname, in JointControlMode jcm);
+
+    /**
+     * @brief set the parcentage to the default servo gain
+     * @param jname joint name, part name or "all"
+     * @param gname gain name: "pgain", "dgain", "tq_pgain", "tq_dgain"
+     * @param percentage to joint servo gain[0-]
+     */
+    void setEachServoGainPercentage(in string jname, in string gname, in double percentage, in boolean instant);
+
+    /**
+     * @brief set all parcentage to the default servo gain
+     * @param jname joint name, part name or "all"
+     * @param percentages list of percentages to joint servo gain[0-]
+     * @param instants sequence of bools of whether to change gain instantly or not
+     */
+     void setAllServoGainPercentage(in string jname, in DblSequence percentages, in BoolSequence instants);
 
   };
 };

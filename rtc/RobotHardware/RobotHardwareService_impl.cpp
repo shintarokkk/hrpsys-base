@@ -232,3 +232,13 @@ void RobotHardwareService_impl::setJointControlMode(const char *jname, OpenHRP::
     }
     m_robot->setJointControlMode(jname, mode);
 }
+
+void RobotHardwareService_impl::setEachServoGainPercentage(const char* jname, const char* gname, double percentage, bool instant)
+{
+    m_robot->setEachServoGainPercentage(jname, gname, percentage, instant);
+}
+
+void RobotHardwareService_impl::setAllServoGainPercentage(const char *jname, const ::OpenHRP::RobotHardwareService::DblSequence &percentages, const ::OpenHRP::RobotHardwareService::BoolSequence &instants)
+{
+    m_robot->setAllServoGainPercentage(jname, percentages.get_buffer(), instants.get_buffer());
+}

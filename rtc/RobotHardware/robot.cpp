@@ -9,7 +9,6 @@
 #include "hrpsys/io/iob.h"
 #include "robot.h"
 #include "hrpsys/util/Hrpsys.h"
-#include "tqGains.h"
 
 #define CALIB_COUNT	(10*200)
 #define GAIN_COUNT	( 5*200)

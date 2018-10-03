@@ -622,6 +622,7 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
     getCurrentParameters();
     getTargetParameters();
     getActualParameters();
+    torqueST();
     calcStateForEmergencySignal();
     switch (control_mode) {
     case MODE_IDLE:
@@ -654,7 +655,7 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
     if (is_legged_robot) {
       for ( int i = 0; i < m_robot->numJoints(); i++ ){
         m_qRef.data[i] = m_robot->joint(i)->q;
-        //m_tau.data[i] = m_robot->joint(i)->u;
+        m_tau.data[i] = m_robot->joint(i)->u;
       }
       m_zmp.data.x = rel_act_zmp(0);
       m_zmp.data.y = rel_act_zmp(1);
@@ -688,7 +689,8 @@ RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
       m_actContactStatesOut.write();
       m_COPInfo.tm = m_qRef.tm;
       m_COPInfoOut.write();
-      //m_tauOut.write();
+      m_tau.tm = m_qRef.tm;
+      m_tauOut.write();
       // for debug output
       m_originRefZmp.data.x = ref_zmp(0); m_originRefZmp.data.y = ref_zmp(1); m_originRefZmp.data.z = ref_zmp(2);
       m_originRefCog.data.x = ref_cog(0); m_originRefCog.data.y = ref_cog(1); m_originRefCog.data.z = ref_cog(2);
@@ -815,6 +817,7 @@ void Stabilizer::getActualParameters ()
     //hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r*0.5, m_rpy.data.p*0.5, m_rpy.data.y*0.5));
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics();
+    act_base_R = m_robot->rootLink()->R;
     act_base_rpy = hrp::rpyFromRot(m_robot->rootLink()->R);
     calcFootOriginCoords (foot_origin_pos, foot_origin_rot);
   } else {
@@ -858,14 +861,43 @@ void Stabilizer::getActualParameters ()
     prev_act_foot_origin_rot = foot_origin_rot;
     act_cogvel = act_cogvel_filter->passFilter(act_cogvel);
     prev_act_cog = act_cog;
+    hrp::Matrix33 act_base_R_vel = (act_base_R - prev_act_base_R) / dt;
+    hrp::Matrix33 omega_mat = act_base_R_vel * act_base_R.transpose();
+    act_base_omega(0) = (omega_mat(2,1) - omega_mat(1,2)) / 2;
+    act_base_omega(1) = (omega_mat(0,2) - omega_mat(2,0)) / 2;
+    act_base_omega(2) = (omega_mat(1,0) - omega_mat(0,1)) / 2;
+    act_base_omega = act_base_omega_filter->passFilter(act_base_omega);
+    prev_act_base_R = act_base_R;
     //act_root_rot = m_robot->rootLink()->R;
+    //TODO:このeeに手は含まれるか
     for (size_t i = 0; i < stikp.size(); i++) {
       hrp::Link* target = m_robot->link(stikp[i].target_name);
       //hrp::Vector3 act_ee_p = target->p + target->R * stikp[i].localCOPPos;
       hrp::Vector3 _act_ee_p = target->p + target->R * stikp[i].localp;
       act_ee_p[i] = foot_origin_rot.transpose() * (_act_ee_p - foot_origin_pos);
       act_ee_R[i] = foot_origin_rot.transpose() * (target->R * stikp[i].localR);
+      if (ref_contact_states != prev_ref_contact_states) {
+          act_ee_vel[i] = (foot_origin_rot.transpose() * prev_act_foot_origin_rot) * act_ee_vel[i];
+      } else {
+          act_ee_vel[i] = (act_ee_p[i] - prev_act_ee_p[i]) /dt;
+      }
+      act_ee_vel[i] = act_ee_vel_filter[i]->passFilter(act_ee_vel[i]);
+      prev_act_ee_p[i] = act_ee_p[i];
+      hrp::Matrix33 act_ee_R_vel = (act_ee_R[i] - prev_act_ee_R[i]) / dt;
+      omega_mat = act_ee_R_vel * act_ee_R[i].transpose();
+      act_ee_omega[i](0) = (omega_mat(2,1) - omega_mat(1,2)) / 2;
+      act_ee_omega[i](1) = (omega_mat(0,2) - omega_mat(2,0)) / 2;
+      act_ee_omega[i](2) = (omega_mat(1,0) - omega_mat(0,1)) / 2;
+      act_aee_omega[i] = act_ee_omega_filter[i]->passFilter(act_ee_omega[i]);
+      prev_act_ee_R[i] = act_ee_R[i];
     }
+    for (size_t i = 0; i < see.size(); i++) {
+        hrp::Link* target = m_robot->link(see[i].target_name);
+        hrp::Vector3 _act_see_p = target->p + target_R * see[i].localp;
+        act_see_p[i] = foot_origin_rot.transpose() * (_act_see_p - foot_origin_pos);
+        act_see_R[i] = foot_origin_rot.transpose() * (target->R * see[i].localR);
+    }
+    prev_act_foot_origin_rot = foot_origin_rot; //TODO: なぜfor文の外?(seeが一本だけ?)
     // capture point
     act_cp = act_cog + act_cogvel / std::sqrt(eefm_gravitational_acceleration / (act_cog - act_zmp)(2));
     rel_act_cp = hrp::Vector3(act_cp(0), act_cp(1), act_zmp(2));

@@ -481,9 +481,9 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            //データの記述?
            //Write Outport
        }
-       // else if (torque_output_type == REF_TORQUE) {
-       //     addDumpingToRefTorque();
-       // }
+       else if (torque_output_type == REF_TORQUE) {
+           addDumpingToRefTorque();
+       }
 
        if(m_lt_col_param["rarm"].test_int1 == 2){
            SimpleCollisionDetector();
@@ -737,7 +737,8 @@ void LimbTorqueController::addDumpingToRefTorque()
             std::string ee_name = it->first;
             for ( size_t i = 0; i < manip->numJoints(); ++i ) {
                 hrp::Link* act_joint = manip->joint(i);
-                act_joint->u += - m_lt_param[ee_name].dgain * act_joint->dq;
+                // act_joint->u += - m_lt_param[ee_name].dgain * act_joint->dq;
+                act_joint->u = 0;
             }}
         ++it;
     }

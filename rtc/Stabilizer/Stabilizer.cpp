@@ -370,10 +370,10 @@ RTC::ReturnCode_t Stabilizer::onInitialize()
       tmp.parent_name = stikp[i].parent_name;
       tmp.localp = stikp[i].localp;
       tmp.localR = stikp[i].localR;
-      tmp.support_front_margin = -1.0;
-      tmp.support_rear_margin = -1.0;
-      tmp.support_left_margin = -1.0;
-      tmp.support_right_margin = -1.0;
+      tmp.support_front_margin = 0.115;
+      tmp.support_rear_margin = 0.115;
+      tmp.support_left_margin = 0.065;
+      tmp.support_right_margin = 0.065;
       see.push_back(tmp);
     }
   }
@@ -615,7 +615,7 @@ RTC::ReturnCode_t Stabilizer::onDeactivated(RTC::UniqueId ec_id)
 RTC::ReturnCode_t Stabilizer::onExecute(RTC::UniqueId ec_id)
 {
   loop++;
-  // std::cout << m_profile.instance_name<< ": onExecute(" << ec_id << ")" << std::endl;
+  //std::cout << m_profile.instance_name<< ": onExecute(" << ec_id << ")" << std::endl;
 
   if (m_qRefIn.isNew()) {
     m_qRefIn.read();
@@ -3001,6 +3001,9 @@ void Stabilizer::torqueST()
                 l++;
             }
         }
+        // for (size_t i = 0; i < 2; i++) {
+        //     std::cout << "ee_force is... " << ee_force[i].transpose() << std::endl;
+        // }
         calcForceMapping(ee_force, enable_ee, joint_torques1);
     }
     if (true) {
@@ -3140,8 +3143,9 @@ bool Stabilizer::distributeForce(const hrp::Vector3& f_ga, const hrp::Vector3& t
     size_t tau_dim = m_robot->numJoints();
     hrp::dvector upperTauLimit;
     hrp::dvector lowerTauLimit;
-    double pgain[] = {3300, 8300, 3300, 3300, 4700, 3300, 3300, 8300, 3300, 3300, 4700, 3300};
-    double dgain[] = {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24};
+    //for JAXON
+    double pgain[] = {3300, 8300, 3300, 3300, 4700, 3300, 3300, 8300, 3300, 3300, 4700, 3300, 8300, 8300, 8300, 1000, 1000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 40, 40, 40, 40, 10};
+    double dgain[] = {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 20, 20, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 1, 1, 1, 1, 0.5};
     makeJointTorqueLimit(pgain, dgain, upperTauLimit, lowerTauLimit);
 
     //friction constraint
@@ -3218,7 +3222,7 @@ bool Stabilizer::distributeForce(const hrp::Vector3& f_ga, const hrp::Vector3& t
     for (size_t i = 0; i < ee_num; i++) {
         ee_force.push_back(output.col(i));
     }
-    if (DEBUGP) {
+    if (loop%1000==0) {
         hrp::dvector y(state_dim+const_dim);
         qpOASES::real_t* yOpt = (qpOASES::real_t*)y.data();
         qp_solver[solver_id].getDualSolution(yOpt);

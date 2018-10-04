@@ -32,6 +32,11 @@ void StabilizerService_impl::setParameter(const OpenHRP::StabilizerService::stPa
 	m_stabilizer->setParameter(i_stp);
 }
 
+void StabilizerService_impl::changeSupportMode(bool flag)
+{
+	m_stabilizer->changeSupportMode(flag);
+}
+
 bool StabilizerService_impl::dummy()
 {
 	std::cout << "StabilizerService: " << std::endl;

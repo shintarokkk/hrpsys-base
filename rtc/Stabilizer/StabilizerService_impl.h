@@ -25,6 +25,7 @@ public:
 	void stopStabilizer(void);
 	void getParameter(OpenHRP::StabilizerService::stParam_out i_param);
 	void setParameter(const OpenHRP::StabilizerService::stParam& i_param);
+	void changeSupportMode(bool flag);
 	void stabilizer(Stabilizer *i_stabilizer);
 
 	bool dummy();

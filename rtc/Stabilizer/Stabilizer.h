@@ -141,6 +141,19 @@ class Stabilizer
   hrp::Vector3 vlimit(const hrp::Vector3& value, double llimit_value, double ulimit_value);
   hrp::Vector3 vlimit(const hrp::Vector3& value, const hrp::Vector3& limit_value);
   hrp::Vector3 vlimit(const hrp::Vector3& value, const hrp::Vector3& llimit_value, const hrp::Vector3& ulimit_value);
+  void calcForceMapping(const std::vector<hrp::dvector6>& ee_force, const std::vector<int>& enable_ee, hrp::dvector& joint_torques);
+  size_t makeFrictionConstraint(const std::vector<int>& enable_ee, double coef, hrp::dmatrix& const_matrix, hrp::dvector& upper_limit, hrp::dvector& lower_limit);
+  size_t makeTauzConstraint(const std::vector<int>& enable_ee, double coef, hrp::dmatrix& const_matrix, hrp::dvector& upper_limit, hrp::dvector& lower_limit);
+  size_t makeTauz2Constraint(const std::vector<int>& enable_ee, double coef, hrp::dmatrix& const_matrix, hrp::dvector& upper_limit, hrp::dvector& lower_limit);
+  void makeJointTorqueLimit(double pgain[], double dgain[], hrp::dvector& upper_limit, hrp::dvector& lower_limit);
+  size_t makeCopConstraint(const std::vector<int>& enable_ee, hrp::dmatrix& const_matrix, hrp::dvector& upper_limit, hrp::dvector& lower_limit);
+  bool distributeForce(const hrp::Vector3& f_ga, const hrp::Vector3& tau_ga, const std::vector<int>& enable_ee, std::vector<hrp::dvector6>& ee_force, int solver_id);
+  void generateSwingFootForce(const hrp::Matrix33& Kpp, const hrp::Matrix33& Kpd, const hrp::Matrix33 Krp, const hrp::Matrix33 Krd, hrp::Vector3& f_foot, hrp::Vector3& tau_foot, size_t i);
+  void generateForce(const hrp::Matrix33& foot_origin_rot, const hrp::Matrix33& Kpp, const hrp::Matrix33& Kpd, const hrp::Matrix33 Krp, const hrp::Matrix33 Krd, hrp::Vector3& f_ga, hrp::Vector3& tau_ga);
+  void calcEforce2ZmpMatrix(hrp::dmatrix& ret, const std::vector<int>& enable_ee, const double zmp_z);
+  void calcEforce2TauMatrix(hrp::dmatrix& ret, const std::vector<int>& enable_ee);
+  void torqueST();
+  void changeSupportMode(bool flag);
 
   inline bool isContact (const size_t idx) // 0 = right, 1 = left
   {
@@ -278,16 +291,28 @@ class Stabilizer
     double avoid_gain, reference_gain, max_limb_length, limb_length_margin;
     size_t ik_loop_count;
   };
+  // Support End Effector Parameters
+  struct SEEParam {
+    std::string target_name; // Name of end link
+    std::string ee_name; // Name of ee (e.g., rleg, lleg, ...)
+    std::string parent_name; // Name of parent ling in the limb
+    hrp::Vector3 localp; // Position of ee in end link frame (^{l}p_e = R_l^T (p_e - p_l))
+    hrp::Matrix33 localR; // Rotation of ee in end link frame (^{l}R_e = R_l^T R_e)
+    double support_front_margin, support_rear_margin, support_left_margin, support_right_margin;
+  };
   enum cmode {MODE_IDLE, MODE_AIR, MODE_ST, MODE_SYNC_TO_IDLE, MODE_SYNC_TO_AIR} control_mode;
+  enum smode {MODE_NORMAL, MODE_SUPPORT, MODE_SYNC_TO_NORMAL, MODE_SYNC_TO_SUPPORT} support_mode;
   // members
   std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
   std::vector<hrp::JointPathExPtr> jpe_v;
   hrp::BodyPtr m_robot;
   coil::Mutex m_mutex;
   unsigned int m_debugLevel;
-  hrp::dvector transition_joint_q, qorg, qrefv;
+  hrp::dvector transition_joint_q, qorg, qrefv, qold;
   std::vector<STIKParam> stikp;
+  std::vector<SEEParam> see;
   std::map<std::string, size_t> contact_states_index_map;
+  std::map<std::string, size_t> support_ee_index_map;
   std::vector<bool> ref_contact_states, prev_ref_contact_states, act_contact_states, is_ik_enable, is_feedback_control_enable, is_zmp_calc_enable;
   std::vector<double> toeheel_ratio;
   double dt;
@@ -300,15 +325,21 @@ class Stabilizer
   hrp::Vector3 current_root_p, target_root_p;
   hrp::Matrix33 current_root_R, target_root_R, prev_act_foot_origin_rot, prev_ref_foot_origin_rot, target_foot_origin_rot, ref_foot_origin_rot;
   std::vector <hrp::Vector3> target_ee_p, rel_ee_pos, act_ee_p, projected_normal, act_force, ref_force, ref_moment;
+  std::vector <hrp::Vector3> ref_ee_p, ref_ee_vel, prev_ref_ee_p, act_ee_vel, prev_act_ee_p, act_ee_omega;
+  std::vector <hrp::Vector3> act_see_p;
+  std::vector <hrp::Matrix33> ref_ee_R, prev_act_ee_R;
   std::vector <hrp::Matrix33> target_ee_R, rel_ee_rot, act_ee_R;
+  std::vector <hrp::Matrix33> act_see_R;
   std::vector<std::string> rel_ee_name;
   rats::coordinates target_foot_midcoords;
   hrp::Vector3 ref_zmp, ref_cog, ref_cp, ref_cogvel, rel_ref_cp, prev_ref_cog, prev_ref_zmp;
-  hrp::Vector3 act_zmp, act_cog, act_cogvel, act_cp, rel_act_zmp, rel_act_cp, prev_act_cog, act_base_rpy, current_base_rpy, current_base_pos, sbp_cog_offset, cp_offset, diff_cp;
+  hrp::Vector3 act_zmp, act_cog, act_cogvel, act_base_omega, act_cp, rel_act_zmp, rel_act_cp, prev_act_cog, act_base_rpy, current_base_rpy, current_base_pos, sbp_cog_offset, cp_offset, diff_cp;
+  hrp::Matrix33 act_base_R, prev_act_base_R;
   hrp::Vector3 foot_origin_offset[2];
   std::vector<double> prev_act_force_z;
   double zmp_origin_off, transition_smooth_gain, d_pos_z_root, limb_stretch_avoidance_time_const, limb_stretch_avoidance_vlimit[2], root_rot_compensation_limit[2];
-  boost::shared_ptr<FirstOrderLowPassFilter<hrp::Vector3> > act_cogvel_filter;
+  boost::shared_ptr<FirstOrderLowPassFilter<hrp::Vector3> > act_cogvel_filter, act_base_omega_filter;
+  std::vector<boost::shared_ptr<FirstOrderLowPassFilter<hrp::Vector3> > > act_ee_vel_filter, act_ee_omega_filter;
   OpenHRP::StabilizerService::STAlgorithm st_algorithm;
   SimpleZMPDistributor* szd;
   std::vector<std::vector<Eigen::Vector2d> > support_polygon_vetices, margined_support_polygon_vetices;
@@ -334,6 +365,8 @@ class Stabilizer
   double total_mass, transition_time, cop_check_margin, contact_decision_threshold;
   std::vector<double> cp_check_margin, tilt_margin;
   OpenHRP::StabilizerService::EmergencyCheckMode emergency_check_mode;
+  std::vector<qpOASES::SQProblem> qp_solver;
+  int support_transition_count;
 };
 
 

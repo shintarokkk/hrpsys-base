@@ -254,6 +254,13 @@ module OpenHRP
     void setParameter(in stParam i_param);
 
     /**
+     * @brief change support mode.
+     * @param true -> support mode, false -> normal mode
+     * @return true if set successfully, false otherwise
+     */
+    void changeSupportMode(in boolean flag);
+
+    /**
      * @brief Start Stabilizer mode.
      * @param
      * @return

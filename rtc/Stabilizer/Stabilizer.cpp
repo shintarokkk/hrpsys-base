@@ -2951,8 +2951,11 @@ void Stabilizer::torqueST()
         hrp::Vector3 f_ga, tau_ga;
         std::vector<hrp::dvector6> ee_force;
         std::vector<int> enable_ee;
-        std::string ee_name[2] = {"rleg", "lleg"};
-        for (size_t i = 0; i < 2; i++) {
+        // std::string ee_name[2] = {"rleg", "lleg"};
+        // int ee_num = 2;
+        std::string ee_name[4] = {"rleg", "lleg", "rarm", "larm"};
+        int ee_num = 4;
+        for (size_t i = 0; i < ee_num; i++) {
             if (ref_contact_states[contact_states_index_map[ee_name[i]]]) {
                 enable_ee.push_back(support_ee_index_map[ee_name[i]]);
             }
@@ -2972,7 +2975,7 @@ void Stabilizer::torqueST()
         Kpd = hrp::Matrix33::Identity() * 50;
         Krp = hrp::Matrix33::Identity() * 100;
         Krd = hrp::Matrix33::Identity() * 10;
-        for (size_t i = 0; i < 2; i++) {
+        for (size_t i = 0; i < ee_num; i++) {
             if (!ref_contact_states[contact_states_index_map[ee_name[i]]]) {
                 Gc1.push_back(hrp::dmatrix::Zero(3, 6));
                 Gc2.push_back(hrp::dmatrix::Zero(3, 6));
@@ -2991,7 +2994,7 @@ void Stabilizer::torqueST()
         size_t l = 0;
         distributeForce(f_ga, tau_ga, enable_ee, tmp_f2, 0);
         enable_ee.clear();
-        for (size_t i = 0; i < 2; i++) {
+        for (size_t i = 0; i < ee_num; i++) {
             enable_ee.push_back(support_ee_index_map[ee_name[i]]);
             if (ref_contact_states[contact_states_index_map[ee_name[i]]]) {
                 ee_force.push_back(tmp_f2[k]);
@@ -3146,6 +3149,8 @@ bool Stabilizer::distributeForce(const hrp::Vector3& f_ga, const hrp::Vector3& t
     //for JAXON
     double pgain[] = {3300, 8300, 3300, 3300, 4700, 3300, 3300, 8300, 3300, 3300, 4700, 3300, 8300, 8300, 8300, 1000, 1000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 40, 40, 40, 40, 10};
     double dgain[] = {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 20, 20, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 1, 1, 1, 1, 0.5};
+    // double pgain[] = {3300, 8300, 3300, 3300, 4700, 3300, 3300, 8300, 3300, 3300, 4700, 3300};
+    // double dgain[] = {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24};
     makeJointTorqueLimit(pgain, dgain, upperTauLimit, lowerTauLimit);
 
     //friction constraint

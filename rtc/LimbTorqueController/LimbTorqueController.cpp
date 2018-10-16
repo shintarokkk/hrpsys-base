@@ -708,12 +708,16 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                 double min_angle = manip->joint(i)->llimit;
                 if ( (now_angle+margin) >= max_angle ) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
+                    //manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
+                    double avoid_torque = - max_torque/margin*(now_angle - (max_angle-margin));
+                    manip->joint(i)->u = std::min(manip->joint(i)->u, avoid_torque);
                     if (loop%500 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }else if ( (now_angle-margin) <= min_angle) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
+                    //manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
+                    double avoid_torque = max_torque/margin*(min_angle+margin - now_angle);
+                    manip->joint(i)->u = std::max(manip->joint(i)->u, avoid_torque);
                     if (loop%500 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }

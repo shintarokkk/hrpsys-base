@@ -123,7 +123,7 @@ private:
     void addDumpingToRefTorque();
     void SimpleCollisionDetector();
 
-    std::map<std::string, LTParam> m_lt_param;
+    std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
     std::map<std::string, ee_trans> ee_map;
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;

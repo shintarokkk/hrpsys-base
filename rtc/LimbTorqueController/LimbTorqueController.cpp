@@ -210,9 +210,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             }
             eet.localR = Eigen::AngleAxis<double>(tmpv[3], hrp::Vector3(tmpv[0], tmpv[1], tmpv[2])).toRotationMatrix(); // rotation in VRML is represented by axis + angle
             eet.target_name = ee_target;
-            // eet.pgain = conf_pgain;
-            // eet.dgain = conf_dgain;
-            // eet.cgain = conf_cgain;
             default_pgain[i] = conf_pgain;
             default_dgain[i] = conf_dgain;
             default_cgain[i] = conf_cgain;
@@ -288,35 +285,25 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
         // 3. Check whether joint path is adequate.
         hrp::Link* target_link = m_robot->link(ee_map[ee_name].target_name);
-        LTParam p;
+        hrp::Link* ref_target_link = m_robotRef->link(ee_map[ee_name].target_name);
+        LTParam p, p_ref;
         p.manip = hrp::JointPathExPtr(new hrp::JointPathEx(m_robot, m_robot->link(base_name_map[ee_name]), target_link, m_dt, false, std::string(m_profile.instance_name)));
+        p_ref.manip = hrp::JointPathExPtr(new hrp::JointPathEx(m_robotRef, m_robotRef->link(base_name_map[ee_name]), ref_target_link, m_dt, false, std::string(m_profile.instance_name)));
         if ( ! p.manip ) {
             std::cerr << "[" << m_profile.instance_name << "]   Invalid joint path from " << base_name_map[ee_name] << " to " << target_link->name << "!! Limb torque param for " << sensor_name << " cannot be added!!" << std::endl;
             continue;
         }
-        // p.basic_jacobians.resize(p.manip->numJoints());
-        // p.inertia_matrices.resize(p.manip->numJoints());
-        // p.gen_inertia_matrix = Eigen::MatrixXd::Zero(p.manip->numJoints(), p.manip->numJoints());
-        //Set size of matrices used in inertial compensation
-        // for (int i=0; i<p.manip->numJoints(); ++i){
-        //     p.basic_jacobians[i] = Eigen::MatrixXd::Zero(6, p.manip->numJoints());
-        //     p.inertia_matrices[i] = Eigen::MatrixXd::Zero(6, 6);
-        //     p.inertia_matrices[i] <<
-        //         p.manip->joint(i)->m, 0.0, 0.0, 0.0, 0.0, 0.0,
-        //         0.0, p.manip->joint(i)->m, 0.0, 0.0, 0.0, 0.0,
-        //         0.0, 0.0, p.manip->joint(i)->m, 0.0, 0.0, 0.0,
-        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(0),
-        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(1),
-        //         0.0, 0.0, 0.0, p.manip->joint(i)->I.row(2);
-        // }
 
         // 4. Set limb torque param
         p.sensor_name = sensor_name;
+        p_ref.sensor_name = sensor_name;
         //現状すべてのlimbに同じ(最初の)ゲインを設定している
-        p.pgain = default_pgain[0];
-        p.dgain = default_dgain[0];
+        p.pgain = default_pgain[0];  p_ref.pgain = default_pgain[0];
+        p.dgain = default_dgain[0];  p_ref.dgain = default_dgain[0];
         p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
+        p_ref.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665);
         m_lt_param[ee_name] = p;
+        m_ref_lt_param[ee_name] = p_ref;
 
         //set collision param
         CollisionParam col_p;
@@ -542,6 +529,12 @@ void LimbTorqueController::getTargetParameters()
             m_robot->joint(i)->u = 0; //temporary
         }
     }
+    m_robot->rootLink()->p = hrp::Vector3::Zero();
+    m_robot->calcForwardKinematics();
+    hrp::Matrix33 senR = hrp::Matrix33::Identity();
+    hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
+    m_robotRef->rootLink()->R = act_Rs * (senR.transpose() * m_robotRef->rootLink()->R); //limited to flat terrain
+    m_robotRef->calcForwardKinematics();
 }
 
 void LimbTorqueController::getActualParameters()
@@ -561,7 +554,7 @@ void LimbTorqueController::getActualParameters()
     m_robot->rootLink()->p = hrp::Vector3::Zero();
     m_robot->calcForwardKinematics();
 
-#if 0
+#if 1 //for legged robot
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
     hrp::Matrix33 senR = sen->link->R * sen->localR;
     hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
@@ -569,15 +562,15 @@ void LimbTorqueController::getActualParameters()
     hrp::Matrix33 senR = hrp::Matrix33::Identity();
     hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
 #endif
-
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics();
 }
 
 void LimbTorqueController::calcLimbInverseDynamics()
 {
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
+    //std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    std::map<std::string, LTParam>::iterator it = m_ref_lt_param.begin();
+    while(it != m_ref_lt_param.end()){
         LTParam& param = it->second;
         if (param.is_active) {
             if (DEBUGP) {
@@ -595,9 +588,12 @@ void LimbTorqueController::calcLimbInverseDynamics()
                 base_link->dvo = base_rot * param.gravitational_acceleration;
             }
             //base_link->dw.setZero();
-            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+            m_robotRef->calcInverseDynamics(base_link, out_f, out_tau);
         }
         ++it;
+    }
+    for(int i=0; i<m_robot->numJoints(); i++){
+        m_robot->joint(i)->u = m_robotRef->joint(i)->u;
     }
 }
 

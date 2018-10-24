@@ -170,6 +170,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     coil::vstring ltc_dgain_str = coil::split(prop["ltc_dgain"], ",");
     coil::vstring ltc_cgain_str = coil::split(prop["ltc_cgain"], ",");
     coil::vstring ltc_rgain_str = coil::split(prop["ltc_rgain"], ",");
+    coil::vstring ltc_climit_str = coil::split(prop["ltc_climit"], ","); //トルク制御用の電流リミット(元のモデル等より少し小さめにすることを想定)
     coil::vstring ltc_collision_threshold_raw = coil::split(prop["ltc_collision_threshold"], "|"); //エンドエフェクタ毎に"|"で区切ってもらう
     std::map<std::string, std::string> base_name_map;
     if (end_effectors_str.size() > 0) {
@@ -381,6 +382,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     qoldRef.resize(dof);
     dqoldRef.resize(dof);
     for (int i=0; i<dof; ++i){
+        coil::stringTo(m_robot->joint(i)->climit, ltc_climit_str[i].c_str()); //limiting current value to one in conf file
         qoldRef[i] = 0.0;
         dqoldRef[i] = 0.0;
     }
@@ -480,6 +482,24 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 
        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
            m_q.data[i] = m_robotRef->joint(i)->q;
+           hrp::Link* current_joint = m_robot->joint(i);
+           //checking torque limits
+           double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+           if (current_joint->u > max_torque){
+               if(loop%100 == 0){
+                   std::cout << "[ltc]joint(" << i << ") reached max torque limit!!"
+                             << "original ref=" << current_joint->u << ",max=" << max_torque
+                             << std::endl;
+               }
+               current_joint->u = max_torque;
+           }else if (current_joint->u < -max_torque){
+               if(loop%100 == 0){
+                   std::cout << "[ltc]joint(" << i << ") reached min torque limit!!"
+                             << " original ref=" << current_joint->u << ",min=" << -max_torque
+                             << std::endl;
+               }
+               current_joint->u = -max_torque;
+           }
            m_tq.data[i] = m_robot->joint(i)->u;
        }
 

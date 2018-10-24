@@ -89,9 +89,7 @@ private:
         std::string sensor_name; // Name of force sensor in the limb
         double pgain, dgain;
         hrp::Vector3 gravitational_acceleration; //重力加速度hrpsys全体のがあればそっちを使う
-        hrp::JointPathExPtr manip;  //manipulator?
-        // std::vector<Eigen::MatrixXd> basic_jacobians, inertia_matrices;
-        // Eigen::MatrixXd gen_inertia_matrix;
+        hrp::JointPathExPtr manip;
         bool is_active;
         //TODO
         hrp::Matrix33 force_gain, moment_gain;
@@ -117,7 +115,6 @@ private:
     void getActualParameters();
     void calcLimbInverseDynamics();
     void calcGravityCompensation();
-    //void calcInertiaCompensation();
     void calcJointDumpingTorque();
     void calcMinMaxAvoidanceTorque();
     void addDumpingToRefTorque();

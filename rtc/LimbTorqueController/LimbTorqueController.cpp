@@ -456,17 +456,11 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        getActualParameters(); //センサ値を変数にセット
 
        if (torque_output_type == CALC_TORQUE) {
-           //参照トルク計算
-           //以下の関数内部で各joint->uにトルクを加算していく
-           //calcGravityCompensation(); //重力補償
-           //calcInertiaCompensation();
 
            calcLimbInverseDynamics();
            calcJointDumpingTorque(); //関節角度ダンピング
            calcMinMaxAvoidanceTorque();
 
-           //データの記述?
-           //Write Outport
        }
        else if (torque_output_type == REF_TORQUE) {
            addDumpingToRefTorque();
@@ -479,16 +473,6 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            CollisionDetector();
        }
        CollisionHandler();
-
-       // if(loop%20000==10000){
-       //     exec_time1 = get_dtime();
-       // }
-       // if(loop%20000==0){
-       //     exec_time2 = get_dtime();
-       //     std::cout << std::endl << std::endl;
-       //     std::cout << "Time for 10000 loop: " << exec_time2 - exec_time1 << std::endl;
-       //     std::cout << std::endl << std::endl;
-       // }
 
        if(spit_log){
            DebugOutput();
@@ -629,41 +613,6 @@ void LimbTorqueController::calcGravityCompensation()
     } //end while
 }
 
-// void LimbTorqueController::calcInertiaCompensation()
-// {
-//     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-//     while(it != m_lt_param.end()){
-//         LTParam& param = it->second;
-//         if (param.is_active) {
-//             if (DEBUGP) {
-//                 std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-//             }
-//             hrp::JointPathExPtr manip = param.manip;
-//             hrp::Link* tmp_updating_joint = manip->baseLink();
-//             param.gen_inertia_matrix = Eigen::MatrixXd::Zero(manip->numJoints(), manip->numJoints()); //reset
-//             //calculate basic jacobian
-//             Eigen::Vector3d omega, arm, omegaxarm;
-//             Eigen::VectorXd joint_acc(manip->numJoints()), joint_tq(manip->numJoints());
-//             for (int i=0; i<manip->numJoints(); ++i){
-//                 param.basic_jacobians[i] = Eigen::MatrixXd::Zero(6, manip->numJoints()); //reset
-//                 joint_acc(i) = m_robotRef->joint(manip->joint(i)->jointId)->ddq;
-//                 for (int j=0; j<=i; ++j){
-//                     omega = manip->joint(j)->R*manip->joint(j)->a;
-//                     arm = manip->joint(i)->wc - manip->joint(j)->p; //wc is updated in calcGravityCompensation
-//                     omegaxarm = omega.cross(arm);
-//                     param.basic_jacobians[i].col(j) << omegaxarm, omega;
-//                 }
-//                 param.gen_inertia_matrix += param.basic_jacobians[i].transpose() * param.inertia_matrices[i] * param.basic_jacobians[i];
-//             }
-//             joint_tq = param.gen_inertia_matrix * joint_acc;
-//             for (int i=0; i<manip->numJoints(); ++i){
-//                 manip->joint(i)->u += joint_tq(i);
-//             }
-//         }
-//         ++it;
-//     }
-// }
-
 void LimbTorqueController::calcJointDumpingTorque()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
@@ -704,14 +653,12 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                 double min_angle = manip->joint(i)->llimit;
                 if ( (now_angle+margin) >= max_angle ) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    //manip->joint(i)->u += - max_torque/margin*(now_angle - (max_angle-margin));
                     double avoid_torque = - max_torque/margin*(now_angle - (max_angle-margin));
                     manip->joint(i)->u = std::min(manip->joint(i)->u, avoid_torque);
                     if (loop%500 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }else if ( (now_angle-margin) <= min_angle) {
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    //manip->joint(i)->u += max_torque/margin*(min_angle+margin - now_angle);
                     double avoid_torque = max_torque/margin*(min_angle+margin - now_angle);
                     manip->joint(i)->u = std::max(manip->joint(i)->u, avoid_torque);
                     if (loop%500 == 0){

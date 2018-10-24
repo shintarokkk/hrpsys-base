@@ -1154,15 +1154,20 @@ void LimbTorqueController::SimpleCollisionDetector()
     }
 }
 
-bool LimbTorqueController::startLog()
+bool LimbTorqueController::startLog(const std::string& i_name_)
 {
-    debug_mom.open(std::string("/home/leus/tmp/CollisionDebug/gen_mom.dat").c_str());
-    debug_actau.open(std::string("/home/leus/tmp/CollisionDebug/ac_tau.dat").c_str());
-    debug_acbet.open(std::string("/home/leus/tmp/CollisionDebug/ac_beta.dat").c_str());
-    debug_acres.open(std::string("/home/leus/tmp/CollisionDebug/ac_res.dat").c_str());
-    debug_res.open(std::string("/home/leus/tmp/CollisionDebug/res.dat").c_str());
-    debug_reftq.open(std::string("/home/leus/tmp/CollisionDebug/ref_tq.dat").c_str());
-    debug_f.open(std::string("/home/leus/tmp/CollisionDebug/ext_f.dat").c_str());
+    struct stat st;
+    std::string logpath = i_name_ + std::string("/CollisionDebug");
+    if(stat(logpath.c_str(), &st) != 0){
+        mkdir(logpath.c_str(), 0775);
+    }
+    debug_mom.open((logpath + std::string("/gen_mom.dat")).c_str());
+    debug_actau.open((logpath + std::string("/ac_tau.dat")).c_str());
+    debug_acbet.open((logpath + std::string("/ac_beta.dat")).c_str());
+    debug_acres.open((logpath + std::string("/ac_res.dat")).c_str());
+    debug_res.open((logpath + std::string("/res.dat")).c_str());
+    debug_reftq.open((logpath + std::string("/ref_tq.dat")).c_str());
+    debug_f.open((logpath + std::string("/ext_f.dat")).c_str());
     spit_log = true;
 }
 

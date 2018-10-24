@@ -10,6 +10,8 @@
 #ifndef LIMBTORQUE_H
 #define LIMBTORQUE_H
 
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <rtm/idl/BasicDataType.hh>
 #include <rtm/idl/ExtendedDataTypes.hh>
 #include <rtm/Manager.h>
@@ -48,7 +50,7 @@ public:
     bool setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_);
     bool getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_);
     bool getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
-    bool startLog();
+    bool startLog(const std::string& i_name_);
     bool stopLog();
 
 protected:

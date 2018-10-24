@@ -49,9 +49,9 @@ CORBA::Boolean LimbTorqueControllerService_impl::getCollisionTorque(const char *
   return m_limbtorque->getCollisionTorque(std::string(i_name_), c_vec_);
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::startLog()
+CORBA::Boolean LimbTorqueControllerService_impl::startLog(const char *i_name_)
 {
-  return m_limbtorque->startLog();
+  return m_limbtorque->startLog(std::string(i_name_));
 }
 
 CORBA::Boolean LimbTorqueControllerService_impl::stopLog()

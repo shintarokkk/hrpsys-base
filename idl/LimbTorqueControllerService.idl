@@ -118,7 +118,7 @@ module OpenHRP
      * @brief start spitting log
      * @return true if got successfully, false otherwise
      */
-    boolean startLog();
+    boolean startLog(in string name);
 
     /**
      * @brief stop spitting log

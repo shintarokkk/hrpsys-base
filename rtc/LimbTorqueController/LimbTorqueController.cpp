@@ -725,6 +725,7 @@ bool LimbTorqueController::startLimbTorqueController(const std::string& i_name_)
         }
         std::cerr << "[" << m_profile.instance_name << "] Start limbtorque control [" << i_name_ << "]" << std::endl;
         m_lt_param[i_name_].is_active = true;
+        m_ref_lt_param[i_name_].is_active = true;
     }
     return true;
 }
@@ -742,8 +743,9 @@ bool LimbTorqueController::stopLimbTorqueController(const std::string& i_name_)
             return false;
         }
         std::cerr << "[" << m_profile.instance_name << "] Stop limbtorque control [" << i_name_ << "]" << std::endl;
-        //TODO: stop limb torque control
-        m_lt_param[i_name_].is_active = false; //need transition?
+        //TODO: transition?
+        m_lt_param[i_name_].is_active = false;
+        m_ref_lt_param[i_name_].is_active = false;
     }
     return true;
 }

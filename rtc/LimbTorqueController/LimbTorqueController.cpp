@@ -381,6 +381,13 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     dqold.resize(dof);
     qoldRef.resize(dof);
     dqoldRef.resize(dof);
+    temp_ref_vel.resize(dof);
+    temp_ref_acc.resize(dof);
+    temp_vel.resize(dof);
+    temp_acc.resize(dof);
+    temp_ref_u.resize(dof);
+    temp_u.resize(dof);
+    temp_invdyn_result.resize(dof);
     for (int i=0; i<dof; ++i){
         coil::stringTo(m_robot->joint(i)->climit, ltc_climit_str[i].c_str()); //limiting current value to one in conf file
         qoldRef[i] = 0.0;
@@ -533,8 +540,8 @@ void LimbTorqueController::getTargetParameters()
             m_robot->joint(i)->u = 0; //temporary
         }
     }
-    m_robot->rootLink()->p = hrp::Vector3::Zero();
-    m_robot->calcForwardKinematics();
+    m_robot->rootLink()->p = hrp::Vector3(m_basePos.data.x, m_basePos.data.y, m_basePos.data.z);
+    m_robotRef->calcForwardKinematics();
     hrp::Matrix33 senR = hrp::Matrix33::Identity();
     hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
     m_robotRef->rootLink()->R = act_Rs * (senR.transpose() * m_robotRef->rootLink()->R); //limited to flat terrain
@@ -560,44 +567,84 @@ void LimbTorqueController::getActualParameters()
 
 #if 1 //for legged robot
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
-    hrp::Matrix33 senR = sen->link->R * sen->localR;
+    //hrp::Matrix33 senR = sen->link->R * sen->localR;
+    hrp::Matrix33 senR = sen->localR;
     hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
 #else
     hrp::Matrix33 senR = hrp::Matrix33::Identity();
     hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
 #endif
-    m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
+    m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);  //is this correct?
     m_robot->calcForwardKinematics();
 }
 
 void LimbTorqueController::calcLimbInverseDynamics()
 {
-    //std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    std::map<std::string, LTParam>::iterator it = m_ref_lt_param.begin();
-    while(it != m_ref_lt_param.end()){
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    std::map<std::string, LTParam>::iterator ref_it = m_ref_lt_param.begin();
+    for(int i=0; i<m_robot->numJoints(); ++i){
+        temp_ref_vel[i] = m_robotRef->joint(i)->dq;
+        temp_ref_acc[i] = m_robotRef->joint(i)->ddq;
+        temp_ref_u[i] = m_robotRef->joint(i)->u;
+        temp_vel[i] = m_robot->joint(i)->dq;
+        temp_acc[i] = m_robot->joint(i)->ddq;
+        temp_u[i] = m_robot->joint(i)->u;
+        temp_invdyn_result[i] = 0;
+    }
+    while(ref_it != m_ref_lt_param.end()){
+        LTParam& ref_param = ref_it->second;
         LTParam& param = it->second;
-        if (param.is_active) {
+        if (ref_param.is_active) {
             if (DEBUGP) {
                 std::cerr << "ここにデバッグメッセージを流す" << std::endl;
             }
+            hrp::Link* ref_base_link = ref_param.manip->baseLink();
             hrp::Link* base_link = param.manip->baseLink();
+            Eigen::MatrixXd ref_base_rot = ref_base_link->R;
             Eigen::MatrixXd base_rot = base_link->R;
             hrp::Vector3 out_f, out_tau;
             out_f = Eigen::Vector3d::Zero(3);
             out_tau = Eigen::Vector3d::Zero(3);
             //TODO: acceleration of baseLink due to fullbody movement
-            if (base_link->parent){
+            if (ref_base_link->parent){
+                ref_base_link->parent->dvo = ref_base_rot * ref_param.gravitational_acceleration;
                 base_link->parent->dvo = base_rot * param.gravitational_acceleration;
             } else{
+                ref_base_link->dvo = ref_base_rot * ref_param.gravitational_acceleration;
                 base_link->dvo = base_rot * param.gravitational_acceleration;
             }
-            //base_link->dw.setZero();
-            m_robotRef->calcInverseDynamics(base_link, out_f, out_tau);
+            m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau);
+            for(int i=0; i<ref_param.manip->numJoints(); i++){
+                int jid = ref_param.manip->joint(i)->jointId;
+                temp_invdyn_result[jid] += m_robotRef->joint(jid)->u;
+                m_robotRef->joint(jid)->u = 0.0;
+                m_robotRef->joint(jid)->dq = 0.0;
+                m_robotRef->joint(jid)->ddq = 0.0;
+                m_robot->joint(jid)->u = 0.0;
+                m_robot->joint(jid)->dq = 0.0;
+                m_robot->joint(jid)->ddq = 0.0;
+            }
+            out_f = Eigen::Vector3d::Zero(3);
+            out_tau = Eigen::Vector3d::Zero(3);
+            m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau); //gravity compensation for ref
+            out_f = Eigen::Vector3d::Zero(3);
+            out_tau = Eigen::Vector3d::Zero(3);
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau); //gravity compensation for act
+            for(int i=0; i<ref_param.manip->numJoints(); i++){
+                int jid = ref_param.manip->joint(i)->jointId;
+                temp_invdyn_result[jid] += m_robot->joint(jid)->u - m_robotRef->joint(jid)->u;
+            }
         }
         ++it;
+        ++ref_it;
     }
     for(int i=0; i<m_robot->numJoints(); i++){
-        m_robot->joint(i)->u = m_robotRef->joint(i)->u;
+        m_robot->joint(i)->u = temp_u[i] + temp_invdyn_result[i];
+        m_robotRef->joint(i)->dq = temp_ref_vel[i];
+        m_robotRef->joint(i)->ddq = temp_ref_acc[i];
+        m_robotRef->joint(i)->u = 0;
+        m_robot->joint(i)->dq = temp_vel[i];
+        m_robot->joint(i)->ddq = temp_acc[i];
     }
 }
 

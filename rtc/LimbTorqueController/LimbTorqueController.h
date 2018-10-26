@@ -136,6 +136,8 @@ private:
     int dummy;
     unsigned int loop;
     std::vector<double> default_pgain, default_dgain;
+    std::vector<double> temp_ref_vel, temp_ref_acc, temp_vel, temp_acc, temp_ref_u, temp_u; //for calcLimbInverseDynamics
+    std::vector<double> temp_invdyn_result;
 
     void CollisionDetector();
     void CollisionHandler();

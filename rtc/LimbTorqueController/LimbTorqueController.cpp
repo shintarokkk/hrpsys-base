@@ -228,6 +228,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             accum_beta.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_beta));
             accum_res.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_res));
             collision_p.insert(std::pair<std::string, bool>(ee_name, false));
+            collision_uncheck_count.insert(std::pair<std::string, int>(ee_name, 0));
             default_collision_threshold.insert(std::pair<std::string, hrp::dvector>(ee_name, one_collision_threshold));
             initial_gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_initial_gen_mom));
             resist_of_one_step_before.insert(std::pair<std::string, hrp::dvector>(ee_name, one_resist_of_one_step_before));
@@ -311,9 +312,11 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         col_p.cgain = default_cgain[0];
         col_p.resist_gain = default_rgain[0];
         col_p.collision_threshold = default_collision_threshold[ee_name];
-        col_p.collisionhandle_p = false;
-        col_p.test_bool1 = false;
-        col_p.test_int1 = 0;
+        //col_p.collisionhandle_p = false;
+        //col_p.test_bool1 = false;
+        //col_p.test_int1 = 0;
+        col_p.check_mode = 0;
+        col_p.handle_mode = 0;
         col_p.max_collision_uncheck_count = 1000;
         m_lt_col_param[ee_name] = col_p;
 
@@ -398,7 +401,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 
     collision_detector_initialized = false;
     gen_imat_initialized = false;
-    collision_uncheck_count = 0;
     spit_log = false;
 
     return RTC::RTC_OK;
@@ -475,12 +477,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            addDumpingToRefTorque();
        }
 
-       if(m_lt_col_param["rarm"].test_int1 == 2){
-           SimpleCollisionDetector();
-       }
-       else{
-           CollisionDetector();
-       }
+       CollisionDetector();
        CollisionHandler();
 
        if(spit_log){
@@ -875,10 +872,13 @@ bool LimbTorqueController::setCollisionParam(const std::string& i_name_, OpenHRP
     }
     m_lt_col_param[name].cgain = i_param_.Cgain;
     m_lt_col_param[name].resist_gain = i_param_.Rgain;
-    m_lt_col_param[name].collisionhandle_p = i_param_.Handle;
+    //m_lt_col_param[name].collisionhandle_p = i_param_.Handle;
     m_lt_col_param[name].max_collision_uncheck_count = i_param_.MaxCount;
-    m_lt_col_param[name].test_bool1 = i_param_.TestB1;
-    m_lt_col_param[name].test_int1 = i_param_.TestI1;
+    //m_lt_col_param[name].test_bool1 = i_param_.TestB1;
+    //m_lt_col_param[name].test_int1 = i_param_.TestI1;
+    m_lt_col_param[name].check_mode = i_param_.CheckMode;
+    m_lt_col_param[name].handle_mode = i_param_.HandleMode;
+    collision_uncheck_count[name] = 0; //initialize to 0(check collision)
 
     hrp::dvector temp_gains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].cgain);
     hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].resist_gain);
@@ -890,7 +890,8 @@ bool LimbTorqueController::setCollisionParam(const std::string& i_name_, OpenHRP
     std::cerr << "[" << m_profile.instance_name << "]  Collision Checking Threshold : " << m_lt_col_param[name].collision_threshold.transpose() << std::endl;
     std::cerr << "[" << m_profile.instance_name << "] Cgain : " << m_lt_col_param[name].cgain << std::endl;
     std::cerr << "[" << m_profile.instance_name << "] Rgain : " << m_lt_col_param[name].resist_gain << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "]       handle colision or not : " << m_lt_col_param[name].collisionhandle_p << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Collision Check Mode : " << m_lt_col_param[name].check_mode << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Collision Handle Mode : " << m_lt_col_param[name].handle_mode << std::endl;
     std::cerr << "[" << m_profile.instance_name << "]      max collision uncheck count(uncheck time = count*hrpsys_periodic_rate) : " << m_lt_col_param[name].max_collision_uncheck_count << std::endl;
     return true;
 }
@@ -902,10 +903,12 @@ void LimbTorqueController::copyCollisionParam(LimbTorqueControllerService::colli
     }
     i_param_.Cgain = param.cgain;
     i_param_.Rgain = param.resist_gain;
-    i_param_.Handle = param.collisionhandle_p;
+    // i_param_.Handle = param.collisionhandle_p;
     i_param_.MaxCount = param.max_collision_uncheck_count;
-    i_param_.TestB1 = param.test_bool1;
-    i_param_.TestI1 = param.test_int1;
+    //i_param_.TestB1 = param.test_bool1;
+    //i_param_.TestI1 = param.test_int1;
+    i_param_.CheckMode = param.check_mode;
+    i_param_.HandleMode = param.handle_mode;
 }
 
 bool LimbTorqueController::getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_)
@@ -949,6 +952,32 @@ extern "C"
 
 void LimbTorqueController::CollisionDetector()
 {
+    std::map<std::string, LTParam>::iterator ltc_it = m_lt_param.begin();
+    std::map<std::string, CollisionParam>::iterator col_it = m_lt_col_param.begin();
+    while(ltc_it != m_lt_param.end()){
+        CollisionParam& col_param = col_it->second;
+        std::string ee_name = ltc_it->first;
+        switch (col_param.check_mode){
+        case 0:
+            break;
+        case 1:
+            CollisionDetector1(ltc_it);
+            break;
+        case 2:
+            CollisionDetector2(ltc_it);
+            break;
+        }
+        ++ltc_it;
+        ++col_it;
+    if(collision_uncheck_count[ee_name] > 0){
+        --collision_uncheck_count[ee_name];
+    }
+    }
+}
+
+//method E(Estimation of tau_ext via Momentum Observer) in S.Haddadin et al. "Robot Collisions: A Survey on Detection, Isolation, and Identification," TRO2017
+void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::iterator it)
+{
     int dof = m_robot->numJoints();
     hrp::dvector dq_backup(dof), ddq_backup(dof), tq_backup(dof);
     for (unsigned int i=0; i<dof; ++i){
@@ -956,111 +985,107 @@ void LimbTorqueController::CollisionDetector()
         ddq_backup[i] = m_robot->joint(i)->ddq;
         tq_backup[i] = m_robot->joint(i)->u;
     }
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        std::string ee_name = it->first;
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            calcGeneralizedInertiaMatrix(it);
-            hrp::JointPathExPtr manip = param.manip;
-            int limbdof = manip->numJoints();
-            hrp::Link* base_link = manip->baseLink();
-            hrp::dmatrix base_rot = base_link->R;
-            hrp::Vector3 out_f, out_tau;
-            out_f = hrp::Vector3::Zero(3);
-            out_tau = hrp::Vector3::Zero(3);
-            base_link->dvo = base_rot * param.gravitational_acceleration;
-            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-            for (unsigned int i=0; i<limbdof; ++i){
-                manip->joint(i)->ddq = 0.0;
-            }
-            hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
-            hrp::dmatrix  inertia_dot;
-            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-            for (unsigned int i=0; i<limbdof; ++i){
-                c_and_g(i) = manip->joint(i)->u;
-                q_dot(i) = dq_backup[manip->joint(i)->jointId];
-            }
-            hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
-            hrp::dmatrix time_matrix = time_vector.asDiagonal();
-            inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
-            beta = c_and_g - inertia_dot*q_dot;
-            for (unsigned int i=0; i<limbdof; ++i){
-                manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
-                manip->joint(i)->dq = 0.0;
-            }
-            base_link->dvo.setZero();
-            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-            out_f = hrp::Vector3::Zero(3);
-            out_tau = hrp::Vector3::Zero(3);
-            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-            for (unsigned int i=0; i<limbdof; ++i){
-                gen_mom[ee_name](i) = manip->joint(i)->u;
-                mot_tq(i) = tq_backup[manip->joint(i)->jointId];
-            }
-            if (!collision_detector_initialized){
-                //old_gen_mom[ee_name] = gen_mom[ee_name];
-                initial_gen_mom[ee_name] = gen_mom[ee_name];
-                collision_detector_initialized = true;
-            }
-            // use command torque
-            if (m_lt_col_param[ee_name].test_int1 == 0){
-                accum_tau[ee_name] += mot_tq*RTC_PERIOD;
-                if(collision_uncheck_count > 0 && m_lt_col_param[ee_name].test_bool1){
-                    accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
-                }
-            }
-            //use sensor torque
-            else if (m_lt_col_param[ee_name].test_int1 == 1){
-                accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD;
-            }
-            accum_beta[ee_name] += beta*RTC_PERIOD;
-            accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
-            //calc residual (need filter?)
-            gen_mom_res[ee_name]
-                = gen_mom_observer_gain[ee_name]
-                * (gen_mom[ee_name] - initial_gen_mom[ee_name]
-                   - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
-                   );
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    if (param.is_active) {
+        if (DEBUGP) {
+            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+        }
+        calcGeneralizedInertiaMatrix(it);
+        hrp::JointPathExPtr manip = param.manip;
+        int limbdof = manip->numJoints();
+        hrp::Link* base_link = manip->baseLink();
+        hrp::dmatrix base_rot = base_link->R;
+        hrp::Vector3 out_f, out_tau;
+        out_f = hrp::Vector3::Zero(3);
+        out_tau = hrp::Vector3::Zero(3);
+        base_link->dvo = base_rot * param.gravitational_acceleration;
+        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+        for (unsigned int i=0; i<limbdof; ++i){
+            manip->joint(i)->ddq = 0.0;
+        }
+        hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
+        hrp::dmatrix  inertia_dot;
+        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+        for (unsigned int i=0; i<limbdof; ++i){
+            c_and_g(i) = manip->joint(i)->u;
+            q_dot(i) = dq_backup[manip->joint(i)->jointId];
+        }
+        hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
+        hrp::dmatrix time_matrix = time_vector.asDiagonal();
+        inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
+        beta = c_and_g - inertia_dot*q_dot;
+        for (unsigned int i=0; i<limbdof; ++i){
+            manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
+            manip->joint(i)->dq = 0.0;
+        }
+        base_link->dvo.setZero();
+        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+        out_f = hrp::Vector3::Zero(3);
+        out_tau = hrp::Vector3::Zero(3);
+        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+        for (unsigned int i=0; i<limbdof; ++i){
+            gen_mom[ee_name](i) = manip->joint(i)->u;
+            mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+        }
+        if (!collision_detector_initialized){
+            //old_gen_mom[ee_name] = gen_mom[ee_name];
+            initial_gen_mom[ee_name] = gen_mom[ee_name];
+            collision_detector_initialized = true;
+        }
 
-            for (int i=limbdof-1; i>=0; --i) {
-                if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count == 0) && m_lt_col_param[ee_name].collisionhandle_p ){
-                    collision_p[ee_name] = true;
+        // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
+        accum_tau[ee_name] += mot_tq*RTC_PERIOD;
+        if(collision_uncheck_count[ee_name] > 0){
+            accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
+        }
+        //use sensor torque //probably correct for torque-controlled real robot?
+        // accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD; //need something during collision handling?
+
+        accum_beta[ee_name] += beta*RTC_PERIOD;
+        accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
+        //calc residual (need filter?)
+        gen_mom_res[ee_name]
+            = gen_mom_observer_gain[ee_name]
+            * (gen_mom[ee_name] - initial_gen_mom[ee_name]
+               - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
+               );
+
+        for (int i=limbdof-1; i>=0; --i) {
+            if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
+                collision_p[ee_name] = true;
+                if(loop%100==0){
                     std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
                     std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
                     std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
                     break;
                 }
             }
-            // if (loop%100 == 0){
-            //     // if (loop%1000==0){
-            //     //     std::cout << "CollisionDetector: residual is ... "  << std::endl << gen_mom_res[ee_name] << std::endl;
-            //     // }
-            //     struct timeval nowtime;
-            //     gettimeofday(&nowtime, NULL);
-            //     debugmom << nowtime.tv_sec << "." << nowtime.tv_usec;
-            //     debugtau << nowtime.tv_sec << "." << nowtime.tv_usec;
-            //     debugbet << nowtime.tv_sec << "." << nowtime.tv_usec;
-            //     debugares << nowtime.tv_sec << "." << nowtime.tv_usec;
-            //     debugres << nowtime.tv_sec << "." << nowtime.tv_usec;
-            //     for (unsigned int i=0; i<limbdof; ++i){
-            //         debugmom << " " << gen_mom[ee_name](i);
-            //         debugtau << " " << accum_tau[ee_name](i);
-            //         debugbet << " " << accum_res[ee_name](i);
-            //         debugares << " " << accum_res[ee_name](i);
-            //         debugres << " " << gen_mom_res[ee_name](i);
-            //     }
-            //     debugmom << std::endl;
-            //     debugtau << std::endl;
-            //     debugbet << std::endl;
-            //     debugares << std::endl;
-            //     debugres << std::endl;
-            // }
         }
-        ++it;
+        // if (loop%100 == 0){
+        //     // if (loop%1000==0){
+        //     //     std::cout << "CollisionDetector: residual is ... "  << std::endl << gen_mom_res[ee_name] << std::endl;
+        //     // }
+        //     struct timeval nowtime;
+        //     gettimeofday(&nowtime, NULL);
+        //     debugmom << nowtime.tv_sec << "." << nowtime.tv_usec;
+        //     debugtau << nowtime.tv_sec << "." << nowtime.tv_usec;
+        //     debugbet << nowtime.tv_sec << "." << nowtime.tv_usec;
+        //     debugares << nowtime.tv_sec << "." << nowtime.tv_usec;
+        //     debugres << nowtime.tv_sec << "." << nowtime.tv_usec;
+        //     for (unsigned int i=0; i<limbdof; ++i){
+        //         debugmom << " " << gen_mom[ee_name](i);
+        //         debugtau << " " << accum_tau[ee_name](i);
+        //         debugbet << " " << accum_res[ee_name](i);
+        //         debugares << " " << accum_res[ee_name](i);
+        //         debugres << " " << gen_mom_res[ee_name](i);
+        //     }
+        //     debugmom << std::endl;
+        //     debugtau << std::endl;
+        //     debugbet << std::endl;
+        //     debugares << std::endl;
+        //     debugres << std::endl;
+        // }
     }
     for (unsigned int i=0; i<dof; ++i){
         m_robot->joint(i)->dq = dq_backup[i];
@@ -1103,41 +1128,50 @@ void LimbTorqueController::calcGeneralizedInertiaMatrix(std::map<std::string, LT
 
 void LimbTorqueController::CollisionHandler()
 {
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        std::string ee_name = it->first;
-        LTParam& param = it->second;
-        hrp::JointPathExPtr manip = param.manip;
-        if (param.is_active && m_lt_col_param[ee_name].collisionhandle_p) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            if(collision_p[ee_name]){
-                collision_p[ee_name] = false;
-                collision_uncheck_count = m_lt_col_param[ee_name].max_collision_uncheck_count;
-            }
-            if(collision_uncheck_count > 0){
-                hrp::dvector collision_resistance_torque = - collision_resistance_gain[ee_name] * gen_mom_res[ee_name];
-                for (int i=0; i<manip->numJoints(); ++i){
-                    manip->joint(i)->u += collision_resistance_torque(i);
+    std::map<std::string, LTParam>::iterator ltc_it = m_lt_param.begin();
+    std::map<std::string, CollisionParam>::iterator col_it = m_lt_col_param.begin();
+    while(col_it != m_lt_col_param.end()){
+        CollisionParam& col_param = col_it->second;
+        switch (col_param.handle_mode){
+        case 0:
+            break;
+            //TODO: case 1
+        case 2: //resist collision
+            std::string ee_name = ltc_it->first;
+            LTParam& ltc_param = ltc_it->second;
+            hrp::JointPathExPtr manip = ltc_param.manip;
+            if (param.is_active) {
+                if (DEBUGP) {
+                    std::cerr << "ここにデバッグメッセージを流す" << std::endl;
                 }
-                resist_of_one_step_before[ee_name] = collision_resistance_torque;
-                //hrp::dmatrix contact_jacobian(6, manip->numJoints()), inv_j(manip->numJoints(), 6);
-                // manip->calcJacobian(contact_jacobian);
-                // hrp::calcPseudoInverse(contact_jacobian.transpose(), inv_j);
-                // hrp::dvector external_force;
-                // external_force = inv_j * gen_mom_res[ee_name];
-                // if (collision_uncheck_count%200 == 0){
-                //     std::cout << "外力は ";
-                //     std::cout << external_force.transpose() << std::endl;
-                // }
-                --collision_uncheck_count;
+                if(collision_p[ee_name]){
+                    collision_p[ee_name] = false;
+                    collision_uncheck_count[ee_name] = col_param.max_collision_uncheck_count;
+                }
+                if(collision_uncheck_count[ee_name] > 0){
+                    hrp::dvector collision_resistance_torque = - collision_resistance_gain[ee_name] * gen_mom_res[ee_name];
+                    for (int i=0; i<manip->numJoints(); ++i){
+                        manip->joint(i)->u += collision_resistance_torque(i);
+                    }
+                    resist_of_one_step_before[ee_name] = collision_resistance_torque;
+                    //hrp::dmatrix contact_jacobian(6, manip->numJoints()), inv_j(manip->numJoints(), 6);
+                    // manip->calcJacobian(contact_jacobian);
+                    // hrp::calcPseudoInverse(contact_jacobian.transpose(), inv_j);
+                    // hrp::dvector external_force;
+                    // external_force = inv_j * gen_mom_res[ee_name];
+                    // if (collision_uncheck_count%200 == 0){
+                    //     std::cout << "外力は ";
+                    //     std::cout << external_force.transpose() << std::endl;
+                    // }
+                }
+                if(collision_uncheck_count[ee_name] == 0){
+                    resist_of_one_step_before[ee_name] = hrp::dvector::Zero(manip->numJoints());
+                }
             }
-            if(collision_uncheck_count == 0){
-                resist_of_one_step_before[ee_name] = hrp::dvector::Zero(manip->numJoints());
-            }
+            break;
         }
-        it++;
+        ltc_it++;
+        col_it++;
     }
 }
 
@@ -1186,40 +1220,31 @@ void LimbTorqueController::DebugOutput()
     }
 }
 
-// double LimbTorqueController::get_dtime(){
-//     struct timeval tv;
-//     gettimeofday(&tv, NULL);
-//     return ((double)(tv.tv_sec) + (double)(tv.tv_usec)*0.001*0.001);
-// }
-
-void LimbTorqueController::SimpleCollisionDetector()
+//simple, rough collision detection method based on measured torque
+void LimbTorqueController::CollisionDetector2(std::map<std::string, LTParam>::iterator it)
 {
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        std::string ee_name = it->first;
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            int limbdof = manip->numJoints();
-            hrp::dvector mot_tq(limbdof);
-            for (unsigned int i=0; i<limbdof; ++i){
-                mot_tq(i) = manip->joint(i)->u;
-            }
-            gen_mom_res[ee_name] = mot_tq - actual_torque_vector;
-            for (int i=limbdof-1; i>=0; --i) {
-                if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count == 0) && m_lt_col_param[ee_name].collisionhandle_p ){
-                    collision_p[ee_name] = true;
-                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                    std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
-                    break;
-                }
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    if (param.is_active) {
+        if (DEBUGP) {
+            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+        }
+        hrp::JointPathExPtr manip = param.manip;
+        int limbdof = manip->numJoints();
+        hrp::dvector mot_tq(limbdof);
+        for (unsigned int i=0; i<limbdof; ++i){
+            mot_tq(i) = manip->joint(i)->u;
+        }
+        gen_mom_res[ee_name] = mot_tq - actual_torque_vector;
+        for (int i=limbdof-1; i>=0; --i) {
+            if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
+                collision_p[ee_name] = true;
+                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
+                break;
             }
         }
-        ++it;
     }
 }
 

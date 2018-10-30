@@ -105,10 +105,9 @@ private:
     struct CollisionParam{
         hrp::dvector collision_threshold;
         double cgain, resist_gain;  //collision observer gain, collision resistance gain
-        bool collisionhandle_p;
         int max_collision_uncheck_count;
-        bool test_bool1;
-        int test_int1;
+        int check_mode; //{0,1,2} = {no check, general momentum method, simple method}
+        int handle_mode; //{0,1,2} = {no check, shock absorption, shock resistance}
     };
 
     void copyLimbTorqueControllerParam (OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param);
@@ -120,7 +119,8 @@ private:
     void calcJointDumpingTorque();
     void calcMinMaxAvoidanceTorque();
     void addDumpingToRefTorque();
-    void SimpleCollisionDetector();
+    void CollisionDetector1(std::map<std::string, LTParam>::iterator it);
+    void CollisionDetector2(std::map<std::string, LTParam>::iterator it);
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
@@ -148,13 +148,13 @@ private:
     std::map<std::string, hrp::dvector> accum_tau, accum_beta, accum_res, initial_gen_mom;
     std::map<std::string, bool> collision_p;
     std::map<std::string, hrp::dvector> resist_of_one_step_before;
+    std::map<std::string, int> collision_uncheck_count;
     std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
     std::ofstream debug_mom, debug_actau, debug_acbet, debug_acres;
     std::ofstream debug_res, debug_reftq, debug_f;
     void DebugOutput();
     std::vector<double> default_cgain, default_rgain;
     bool collision_detector_initialized, gen_imat_initialized;
-    int collision_uncheck_count;
 
     //collision-param
     std::map<std::string, hrp::dmatrix> gen_mom_observer_gain, collision_resistance_gain;
@@ -162,9 +162,6 @@ private:
     int max_collision_uncheck_count;
     hrp::dvector actual_torque_vector;
     bool spit_log;
-
-    // double exec_time1, exec_time2;
-    // double get_dtime();
 };
 
 extern "C"

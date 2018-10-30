@@ -54,10 +54,12 @@ module OpenHRP
         DblSequence Thresh;
         double Cgain;
         double Rgain;
-        boolean Handle;
+        // boolean Handle;
         long MaxCount;
-        boolean TestB1;
-        long TestI1;
+        // boolean TestB1;
+        // long TestI1;
+        long CheckMode;
+        long HandleMode;
     };
 
       /**

@@ -1036,9 +1036,9 @@ void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::it
 
         // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
         accum_tau[ee_name] += mot_tq*RTC_PERIOD;
-        if(collision_uncheck_count[ee_name] > 0){
-            accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
-        }
+        // if(collision_uncheck_count[ee_name] > 0){
+        //     accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
+        // }
         //use sensor torque //probably correct for torque-controlled real robot?
         // accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD; //need something during collision handling?
 
@@ -1140,7 +1140,7 @@ void LimbTorqueController::CollisionHandler()
             std::string ee_name = ltc_it->first;
             LTParam& ltc_param = ltc_it->second;
             hrp::JointPathExPtr manip = ltc_param.manip;
-            if (param.is_active) {
+            if (ltc_param.is_active) {
                 if (DEBUGP) {
                     std::cerr << "ここにデバッグメッセージを流す" << std::endl;
                 }

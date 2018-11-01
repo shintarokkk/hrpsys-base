@@ -106,7 +106,7 @@ private:
         hrp::dvector collision_threshold;
         double cgain, resist_gain;  //collision observer gain, collision resistance gain
         int max_collision_uncheck_count;
-        int check_mode; //{0,1,2} = {no check, general momentum method, simple method}
+        int check_mode; //{0,1,2,3} = {no check, general momentum method, simple method, directional}
         int handle_mode; //{0,1,2} = {no check, shock absorption, shock resistance}
     };
 
@@ -121,12 +121,15 @@ private:
     void addDumpingToRefTorque();
     void CollisionDetector1(std::map<std::string, LTParam>::iterator it);
     void CollisionDetector2(std::map<std::string, LTParam>::iterator it);
+    void CollisionDetector3(std::map<std::string, LTParam>::iterator it);
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
     std::map<std::string, ee_trans> ee_map;
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
+    std::map<std::string, hrp::dvector> resist_direction;
+    std::map<std::string, hrp::dmatrix> ee_jacobian, inv_ee_jacobian_t;
     double m_dt;
     hrp::BodyPtr m_robot;
     hrp::BodyPtr m_robotRef;
@@ -146,15 +149,17 @@ private:
     std::map<std::string, hrp::dmatrix> limb_inertia_matrix;
     std::map<std::string, hrp::dvector> gen_mom, old_gen_mom, gen_mom_res; //generalized momentum, and its residual
     std::map<std::string, hrp::dvector> accum_tau, accum_beta, accum_res, initial_gen_mom;
+    std::map<std::string, hrp::dvector> resist_dir_torque, relax_dir_torque; //collision torque for arbitrary direction
     std::map<std::string, bool> collision_p;
     std::map<std::string, hrp::dvector> resist_of_one_step_before;
     std::map<std::string, int> collision_uncheck_count;
+    std::map<std::string, bool> collision_detector_initialized, gen_imat_initialized;
     std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
-    std::ofstream debug_mom, debug_actau, debug_acbet, debug_acres;
-    std::ofstream debug_res, debug_reftq, debug_f;
+    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres;
+    std::map<std::string, std::ofstream*> debug_res, debug_reftq, debug_f;
+    std::map<std::string, std::ofstream*> debug_resdir;
     void DebugOutput();
     std::vector<double> default_cgain, default_rgain;
-    bool collision_detector_initialized, gen_imat_initialized;
 
     //collision-param
     std::map<std::string, hrp::dmatrix> gen_mom_observer_gain, collision_resistance_gain;

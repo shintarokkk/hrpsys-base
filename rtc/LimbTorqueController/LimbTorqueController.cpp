@@ -1402,9 +1402,9 @@ void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::it
             << temp_ee_rot, hrp::Matrix33::Zero(),
             hrp::Matrix33::Zero(), hrp::Matrix33::Zero();
         //std::cout << temp_ee_rot_double << std::endl;
-        hrp::dvector world_resist_direction = temp_ee_rot_double.transpose() * resist_direction[ee_name];
+        hrp::dvector world_resist_direction = temp_ee_rot_double * resist_direction[ee_name];
         //std::cout << "resist direction for " << ee_name << " is " << world_resist_direction.transpose() << std::endl;
-        external_force = temp_ee_rot_double * inv_ee_jacobian_t[ee_name]*gen_mom_res[ee_name]; //in end-effector local frame
+        external_force = temp_ee_rot_double.transpose() * inv_ee_jacobian_t[ee_name]*gen_mom_res[ee_name]; //in end-effector local frame
         resist_dir_torque[ee_name] = ee_jacobian[ee_name].transpose() * (world_resist_direction.dot(inv_ee_jacobian_t[ee_name]*gen_mom_res[ee_name]) * world_resist_direction);
         // if(loop%300==0){
         //     std::cout << std::endl;

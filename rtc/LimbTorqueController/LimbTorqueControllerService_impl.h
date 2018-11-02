@@ -31,6 +31,7 @@ public:
   CORBA::Boolean setCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam &i_param_);
   CORBA::Boolean getCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam_out i_param_);
   CORBA::Boolean getCollisionTorque(const char *i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
+  CORBA::Boolean getCollisionStatus(const char *i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_);
   CORBA::Boolean startLog(const char *i_name_);
   CORBA::Boolean stopLog();
 

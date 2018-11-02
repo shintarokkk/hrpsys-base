@@ -227,8 +227,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             accum_tau.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_tau));
             accum_beta.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_beta));
             accum_res.insert(std::pair<std::string, hrp::dvector>(ee_name, one_accum_res));
-            collision_p.insert(std::pair<std::string, bool>(ee_name, false));
             collision_uncheck_count.insert(std::pair<std::string, int>(ee_name, 0));
+            collision_link.insert(std::pair<std::string, std::string>(ee_name, "no collision"));
             default_collision_threshold.insert(std::pair<std::string, hrp::dvector>(ee_name, one_collision_threshold));
             initial_gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_initial_gen_mom));
             resist_of_one_step_before.insert(std::pair<std::string, hrp::dvector>(ee_name, one_resist_of_one_step_before));
@@ -362,7 +362,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[ee_name].manip->numJoints(), param.resist_gain);
         gen_mom_observer_gain[ee_name] = temp_gains.asDiagonal();
         collision_resistance_gain[ee_name] = temp_rgains.asDiagonal();
-        collision_p[ee_name] = false;
         collision_detector_initialized[ee_name] = false;
         gen_imat_initialized[ee_name] = false;
         ++c_it;
@@ -943,6 +942,34 @@ bool LimbTorqueController::getCollisionTorque(const std::string& i_name_, OpenHR
     return true;
 }
 
+bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_)
+{
+    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
+        return false;
+    }
+    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionStatus();
+    i_param_->CollisionTorque.length(m_lt_param[i_name_].manip->numJoints());
+    for (int i=0; i<m_lt_param[i_name_].manip->numJoints(); i++){
+        switch(m_lt_col_param[i_name_].check_mode){
+        case 0:
+            i_param_->CollisionTorque[i] = 0;
+        case 2:
+            i_param_->CollisionTorque[i] = gen_mom_res[i_name_](i);
+        case 3:
+            i_param_->CollisionTorque[i] = resist_dir_torque[i_name_](i);
+        }
+    }
+    if (collision_uncheck_count[i_name_] > 0){
+        i_param_->IsCollision = true;
+        i_param_->CollisionLink = collision_link[i_name_].c_str();
+    }else{
+        i_param_->IsCollision = false;
+        i_param_->CollisionLink = "No Collision";
+    }
+    return true;
+}
+
 extern "C"
 {
     void LimbTorqueControllerInit(RTC::Manager* manager)
@@ -1058,13 +1085,14 @@ void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::it
 
         for (int i=limbdof-1; i>=0; --i) {
             if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_p[ee_name] = true;
-                if(loop%100==0){
-                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                    std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
-                    break;
-                }
+                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
+                collision_link[ee_name] = manip->joint(i)->name;
+                std::cout << std::endl;
+                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
+                std::cout << std::endl;
+                break;
             }
         }
         // if (loop%100 == 0){
@@ -1147,10 +1175,6 @@ void LimbTorqueController::CollisionHandler()
             if (ltc_param.is_active) {
                 if (DEBUGP) {
                     std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-                }
-                if(collision_p[ee_name]){
-                    collision_p[ee_name] = false;
-                    collision_uncheck_count[ee_name] = col_param.max_collision_uncheck_count;
                 }
                 if(collision_uncheck_count[ee_name] > 0){
                     hrp::dvector collision_resistance_torque = - collision_resistance_gain[ee_name] * gen_mom_res[ee_name];
@@ -1255,7 +1279,8 @@ void LimbTorqueController::CollisionDetector2(std::map<std::string, LTParam>::it
         gen_mom_res[ee_name] = mot_tq - actual_torque_vector;
         for (int i=limbdof-1; i>=0; --i) {
             if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_p[ee_name] = true;
+                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
+                collision_link[ee_name] = manip->joint(i)->name;
                 std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
                 std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
                 std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
@@ -1414,16 +1439,15 @@ void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::it
 
         for (int i=limbdof-1; i>=0; --i) {
             if( (std::abs(resist_dir_torque[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_p[ee_name] = true;
-                if(loop%100==0){
-                    std::cout << std::endl;
-                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                    std::cout << "now    = " << resist_dir_torque[ee_name].transpose() << std::endl;
-                    std::cout << "corresponding external force = " << external_force.transpose() << std::endl;
-                    std::cout << std::endl;
-                    break;
-                }
+                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
+                collision_link[ee_name] = manip->joint(i)->name;
+                std::cout << std::endl;
+                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                std::cout << "now    = " << resist_dir_torque[ee_name].transpose() << std::endl;
+                std::cout << "corresponding external force = " << external_force.transpose() << std::endl;
+                std::cout << std::endl;
+                break;
             }
         }
     }

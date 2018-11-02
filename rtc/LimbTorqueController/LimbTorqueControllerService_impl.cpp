@@ -49,6 +49,11 @@ CORBA::Boolean LimbTorqueControllerService_impl::getCollisionTorque(const char *
   return m_limbtorque->getCollisionTorque(std::string(i_name_), c_vec_);
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::getCollisionStatus(const char *i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_)
+{
+  return m_limbtorque->getCollisionStatus(std::string(i_name_), i_param_);
+}
+
 CORBA::Boolean LimbTorqueControllerService_impl::startLog(const char *i_name_)
 {
   return m_limbtorque->startLog(std::string(i_name_));

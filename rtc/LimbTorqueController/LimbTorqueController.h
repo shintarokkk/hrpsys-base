@@ -50,6 +50,7 @@ public:
     bool setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_);
     bool getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_);
     bool getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
+    bool getCollisionStatus(const std::string& i_name_, LimbTorqueControllerService::collisionStatus_out i_param_);
     bool startLog(const std::string& i_name_);
     bool stopLog();
 
@@ -150,9 +151,9 @@ private:
     std::map<std::string, hrp::dvector> gen_mom, old_gen_mom, gen_mom_res; //generalized momentum, and its residual
     std::map<std::string, hrp::dvector> accum_tau, accum_beta, accum_res, initial_gen_mom;
     std::map<std::string, hrp::dvector> resist_dir_torque, relax_dir_torque; //collision torque for arbitrary direction
-    std::map<std::string, bool> collision_p;
     std::map<std::string, hrp::dvector> resist_of_one_step_before;
     std::map<std::string, int> collision_uncheck_count;
+    std::map<std::string, std::string> collision_link;
     std::map<std::string, bool> collision_detector_initialized, gen_imat_initialized;
     std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres;

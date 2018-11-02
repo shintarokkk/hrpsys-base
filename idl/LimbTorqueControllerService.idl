@@ -59,6 +59,17 @@ module OpenHRP
         long HandleMode;
     };
 
+    /**
+     * @struct collisionStatus
+     * @brief collision status for one end-effector.
+     */
+    struct collisionStatus {
+        DblSequence CollisionTorque;
+        boolean IsCollision;
+        string CollisionLink;
+    };
+
+
       /**
        * @brief start limb torque controller
        * @param name limb torque controller param's name, which basically corresponds to force sensor name
@@ -112,6 +123,14 @@ module OpenHRP
      * @return true if got successfully, false otherwise
      */
     boolean getCollisionTorque(in string name, out DblSequence c_vector);
+
+    /**
+     * @brief get collision status.
+     * @param name limb torque controller param's name, which basically corresponds to force sensor name
+     * @param i_param output collision status
+     * @return true if got successfully, false otherwise
+     */
+    boolean getCollisionStatus(in string name, out collisionStatus i_param);
 
     /**
      * @brief start spitting log

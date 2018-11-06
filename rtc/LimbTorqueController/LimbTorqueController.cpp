@@ -556,7 +556,7 @@ void LimbTorqueController::getTargetParameters()
     target_root_R = hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y);
 #else
     target_root_p = hrp::Vector3::Zero();
-    target_root_R = hrp::Matrix33::Identiry();
+    target_root_R = hrp::Matrix33::Identity();
 #endif
     m_robotRef->rootLink()->p = target_root_p;
     m_robotRef->rootLink()->R = target_root_R;

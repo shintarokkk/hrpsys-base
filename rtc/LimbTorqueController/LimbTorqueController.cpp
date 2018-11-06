@@ -163,7 +163,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
     }
     torque_output_type = CALC_TORQUE;
-
     // setting from conf file
     coil::vstring end_effectors_str = coil::split(prop["end_effectors"], ",");
     coil::vstring ltc_pgain_str = coil::split(prop["ltc_pgain"], ",");
@@ -954,7 +953,7 @@ bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHR
         switch(m_lt_col_param[i_name_].check_mode){
         case 0:
             i_param_->CollisionTorque[i] = 0;
-        case 2:
+        case 1:
             i_param_->CollisionTorque[i] = gen_mom_res[i_name_](i);
         case 3:
             i_param_->CollisionTorque[i] = resist_dir_torque[i_name_](i);
@@ -1058,7 +1057,10 @@ void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::it
         m_robot->calcInverseDynamics(base_link, out_f, out_tau);
         for (unsigned int i=0; i<limbdof; ++i){
             gen_mom[ee_name](i) = manip->joint(i)->u;
-            mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+            // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
+            //mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+            // use sensor torque //probably correct for torque-controlled real robot?
+            mot_tq(i) = actual_torque_vector[manip->joint(i)->jointId];
         }
         if (!collision_detector_initialized[ee_name]){
             //old_gen_mom[ee_name] = gen_mom[ee_name];
@@ -1066,13 +1068,10 @@ void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::it
             collision_detector_initialized[ee_name] = true;
         }
 
-        // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
         accum_tau[ee_name] += mot_tq*RTC_PERIOD;
         // if(collision_uncheck_count[ee_name] > 0){
         //     accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
         // }
-        //use sensor torque //probably correct for torque-controlled real robot?
-        // accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD; //need something during collision handling?
 
         accum_beta[ee_name] += beta*RTC_PERIOD;
         accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
@@ -1391,7 +1390,10 @@ void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::it
         m_robot->calcInverseDynamics(base_link, out_f, out_tau);
         for (unsigned int i=0; i<limbdof; ++i){
             gen_mom[ee_name](i) = manip->joint(i)->u;
+            // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
             mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+            // use sensor torque //probably correct for torque-controlled real robot?
+            mot_tq(i) = actual_torque_vector[manip->joint(i)->jointId];
         }
         if (!collision_detector_initialized[ee_name]){
             //old_gen_mom[ee_name] = gen_mom[ee_name];
@@ -1399,13 +1401,10 @@ void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::it
             collision_detector_initialized[ee_name] = true;
         }
 
-        // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
         accum_tau[ee_name] += mot_tq*RTC_PERIOD;
         // if(collision_uncheck_count[ee_name] > 0){
         //     accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
         // }
-        //use sensor torque //probably correct for torque-controlled real robot?
-        // accum_tau[ee_name] += actual_torque_vector*RTC_PERIOD; //need something during collision handling?
 
         accum_beta[ee_name] += beta*RTC_PERIOD;
         accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;

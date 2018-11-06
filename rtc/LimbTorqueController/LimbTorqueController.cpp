@@ -302,6 +302,14 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p.dgain = default_dgain[0];  p_ref.dgain = default_dgain[0];
         p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
         p_ref.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665);
+        hrp::Vector3 ee_pgainp_vec, ee_pgainr_vec;
+        hrp::dvector ee_dgain_vec(6);
+        ee_pgainp_vec << 100,100,100;
+        ee_pgainr_vec << 10,10,10;
+        ee_dgain_vec << 10, 10, 10, 1, 1, 1;
+        p.ee_pgain_p = ee_pgainp_vec.asDiagonal();
+        p.ee_pgain_r = ee_pgainr_vec.asDiagonal();
+        p.ee_dgain = ee_dgain_vec.asDiagonal();
         m_lt_param[ee_name] = p;
         m_ref_lt_param[ee_name] = p_ref;
 
@@ -476,6 +484,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 
            calcLimbInverseDynamics();
            calcJointDumpingTorque(); //関節角度ダンピング
+           calcEECompensation();
            calcMinMaxAvoidanceTorque();
 
        }
@@ -542,11 +551,15 @@ void LimbTorqueController::getTargetParameters()
             m_robot->joint(i)->u = 0; //temporary
         }
     }
-    m_robot->rootLink()->p = hrp::Vector3(m_basePos.data.x, m_basePos.data.y, m_basePos.data.z);
-    m_robotRef->calcForwardKinematics();
-    hrp::Matrix33 senR = hrp::Matrix33::Identity();
-    hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
-    m_robotRef->rootLink()->R = act_Rs * (senR.transpose() * m_robotRef->rootLink()->R); //limited to flat terrain
+#if 1 //forlegged robot
+    target_root_p = hrp::Vector3(m_basePos.data.x, m_basePos.data.y, m_basePos.data.z);
+    target_root_R = hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y);
+#else
+    target_root_p = hrp::Vector3::Zero();
+    target_root_R = hrp::Matrix33::Identiry();
+#endif
+    m_robotRef->rootLink()->p = target_root_p;
+    m_robotRef->rootLink()->R = target_root_R;
     m_robotRef->calcForwardKinematics();
 }
 
@@ -565,18 +578,16 @@ void LimbTorqueController::getActualParameters()
         qold[i] = m_qCurrent.data[i];
     }
     m_robot->rootLink()->p = hrp::Vector3::Zero();
-    m_robot->calcForwardKinematics();
-
 #if 1 //for legged robot
+    m_robot->rootLink()->p(2) = m_robotRef->rootLink()->p(2);
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
-    //hrp::Matrix33 senR = sen->link->R * sen->localR;
     hrp::Matrix33 senR = sen->localR;
     hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
 #else
     hrp::Matrix33 senR = hrp::Matrix33::Identity();
     hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
 #endif
-    m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);  //is this correct?
+    m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robotRef->rootLink()->R); //correct?
     m_robot->calcForwardKinematics();
 }
 
@@ -814,9 +825,13 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         m_lt_param[name].pgain = i_param_.Pgain;
         m_lt_param[name].dgain = i_param_.Dgain;
 
-        //TODO: force_gain, moment_gain
-        m_lt_param[name].force_gain = hrp::Vector3(i_param_.force_gain[0], i_param_.force_gain[1], i_param_.force_gain[2]).asDiagonal();
-        m_lt_param[name].moment_gain = hrp::Vector3(i_param_.moment_gain[0], i_param_.moment_gain[1], i_param_.moment_gain[2]).asDiagonal();
+        hrp::dvector ee_pgain_vec(6), ee_dgain_vec(6);
+        ee_pgain_vec << i_param_.ee_pgain[0], i_param_.ee_pgain[1], i_param_.ee_pgain[2], i_param_.ee_pgain[3], i_param_.ee_pgain[4], i_param_.ee_pgain[5];
+        ee_dgain_vec << i_param_.ee_dgain[0], i_param_.ee_dgain[1], i_param_.ee_dgain[2], i_param_.ee_dgain[3], i_param_.ee_dgain[4], i_param_.ee_dgain[5];
+        m_lt_param[name].ee_pgain_p = ee_pgain_vec.head(3).asDiagonal();
+        m_lt_param[name].ee_pgain_r = ee_pgain_vec.tail(3).asDiagonal();
+        m_lt_param[name].ee_dgain = ee_dgain_vec.asDiagonal();
+        hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
 
         //TODO: コントローラがACTIVEの時モード変更できないように制限
         switch (i_param_.torque_output_type){
@@ -832,8 +847,8 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]       force_gain : " << m_lt_param[name].force_gain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]      moment_gain : " << m_lt_param[name].moment_gain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]       ee_pgain : " << concatenated_pgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]      ee_dgain : " << m_lt_param[name].ee_dgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
     }
     return true;
 }
@@ -842,8 +857,9 @@ void LimbTorqueController::copyLimbTorqueControllerParam(LimbTorqueControllerSer
 {
     i_param_.Pgain = param.pgain;
     i_param_.Dgain = param.dgain;
-    for (size_t i = 0; i < 3; i++) i_param_.force_gain[i] = param.force_gain(i,i);
-    for (size_t i = 0; i < 3; i++) i_param_.moment_gain[i] = param.moment_gain(i,i);
+    for (size_t i = 0; i < 3; i++) i_param_.ee_pgain[i] = param.ee_pgain_p(i,i);
+    for (size_t i = 3; i < 6; i++) i_param_.ee_pgain[i] = param.ee_pgain_r(i-3,i-3);
+    for (size_t i = 0; i < 6; i++) i_param_.ee_dgain[i] = param.ee_dgain(i,i);
 
     if (param.is_active) i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_ACTIVE;
     else i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_IDLE;
@@ -1454,5 +1470,50 @@ void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::it
         m_robot->joint(i)->dq = dq_backup[i];
         m_robot->joint(i)->ddq = ddq_backup[i];
         m_robot->joint(i)->u = tq_backup[i];
+    }
+}
+
+void LimbTorqueController::calcEECompensation()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        LTParam& ref_param = m_ref_lt_param[ee_name];
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::JointPathExPtr manip = param.manip;
+            hrp::JointPathExPtr ref_manip = ref_param.manip;
+            int limb_dof = manip->numJoints();
+            hrp::dvector ee_pos_ori_comp_force(6), ee_vel_w_error(6);
+            hrp::Link* target = m_robot->link(ee_map[it->first].target_name);
+            hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
+            hrp::Link* ref_el = m_robotRef->link(ee_map[ee_name].target_name);
+            // calculate position, orientation error and compensation force for it
+            hrp::Vector3 ee_pos_comp_force = param.ee_pgain_p * ((ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos));
+            hrp::Matrix33 ee_ori_error_mat = ref_el->R.transpose() * act_el->R;
+            Eigen::Quaternion<double> ee_ori_error_quat(ee_ori_error_mat);
+            hrp::Vector3 ori_comp_calc_right = param.ee_pgain_r * ee_ori_error_quat.vec();
+            hrp::Vector3 ee_ori_comp_moment = - 2.0*(ee_ori_error_quat.w()*ori_comp_calc_right + ee_ori_error_quat.vec().cross(ori_comp_calc_right));
+            ee_pos_ori_comp_force << ee_pos_comp_force, ee_ori_comp_moment;
+            // calculate translational velocity, angular velocity error
+            hrp::dmatrix act_ee_jacobian(6, limb_dof), ref_ee_jacobian(6, limb_dof);
+            hrp::dvector act_dq_vec(limb_dof), ref_dq_vec(limb_dof);
+            for (int i=0; i<limb_dof; i++) {
+                act_dq_vec(i) = manip->joint(i)->dq;
+                ref_dq_vec(i) = ref_manip->joint(i)->dq;
+            }
+            manip->calcJacobian(act_ee_jacobian);
+            ref_manip->calcJacobian(ref_ee_jacobian);
+            ee_vel_w_error << ref_ee_jacobian * ref_dq_vec - act_ee_jacobian * act_dq_vec;
+            // calculate joint torques
+            hrp::dvector ee_compensation_torque = act_ee_jacobian.transpose() * (ee_pos_ori_comp_force + param.ee_dgain * ee_vel_w_error);
+            for (int i=0; i<limb_dof; i++){
+                m_robot->joint(manip->joint(i)->jointId)->u += ee_compensation_torque(i);
+            }
+        }
+        ++it;
     }
 }

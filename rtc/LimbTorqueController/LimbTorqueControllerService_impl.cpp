@@ -29,8 +29,8 @@ CORBA::Boolean LimbTorqueControllerService_impl::setLimbTorqueControllerParam(co
 CORBA::Boolean LimbTorqueControllerService_impl::getLimbTorqueControllerParam(const char *i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam_out i_param_)
 {
     i_param_ = new OpenHRP::LimbTorqueControllerService::limbtorqueParam();
-    i_param_->force_gain.length(3);
-    i_param_->moment_gain.length(3);
+    i_param_->ee_pgain.length(6);
+    i_param_->ee_dgain.length(6);
     return m_limbtorque->getLimbTorqueControllerParam(std::string(i_name_), *i_param_);
 }
 

@@ -94,8 +94,8 @@ private:
         hrp::Vector3 gravitational_acceleration; //重力加速度hrpsys全体のがあればそっちを使う
         hrp::JointPathExPtr manip;
         bool is_active;
-        //TODO
-        hrp::Matrix33 force_gain, moment_gain;
+        hrp::Matrix33 ee_pgain_p, ee_pgain_r;
+        hrp::dmatrix ee_dgain;
     };
     struct ee_trans {
         std::string target_name;
@@ -123,6 +123,7 @@ private:
     void CollisionDetector1(std::map<std::string, LTParam>::iterator it);
     void CollisionDetector2(std::map<std::string, LTParam>::iterator it);
     void CollisionDetector3(std::map<std::string, LTParam>::iterator it);
+    void calcEECompensation();
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
@@ -136,6 +137,8 @@ private:
     hrp::BodyPtr m_robotRef;
     coil::Mutex m_mutex;
     hrp::dvector qold, qoldRef, dqold, dqoldRef;
+    hrp::Matrix33 target_root_R;
+    hrp::Vector3 target_root_p;
     unsigned int m_debugLevel;
     int dummy;
     unsigned int loop;

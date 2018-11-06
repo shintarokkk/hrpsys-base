@@ -41,9 +41,8 @@ module OpenHRP
         double Dgain;
         ControllerMode controller_mode;
         TorqueOutputType torque_output_type;
-        //TODO
-        DblSequence3 force_gain;
-        DblSequence3 moment_gain;
+        DblSequence ee_pgain;
+        DblSequence ee_dgain;
     };
 
     /**

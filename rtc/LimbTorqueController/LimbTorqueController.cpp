@@ -304,8 +304,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p_ref.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665);
         hrp::Vector3 ee_pgainp_vec, ee_pgainr_vec;
         hrp::dvector ee_dgain_vec(6);
-        ee_pgainp_vec << 100,100,100;
-        ee_pgainr_vec << 10,10,10;
+        ee_pgainp_vec << 50,50,50;
+        ee_pgainr_vec << 250,250,250;
         ee_dgain_vec << 10, 10, 10, 1, 1, 1;
         p.ee_pgain_p = ee_pgainp_vec.asDiagonal();
         p.ee_pgain_r = ee_pgainr_vec.asDiagonal();

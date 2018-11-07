@@ -124,6 +124,7 @@ private:
     void CollisionDetector2(std::map<std::string, LTParam>::iterator it);
     void CollisionDetector3(std::map<std::string, LTParam>::iterator it);
     void calcEECompensation();
+    void calcNullJointDumping();
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
@@ -131,7 +132,7 @@ private:
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
     std::map<std::string, hrp::dvector> resist_direction;
-    std::map<std::string, hrp::dmatrix> ee_jacobian, inv_ee_jacobian_t;
+    std::map<std::string, hrp::dmatrix> act_ee_jacobian, ref_ee_jacobian, inv_ee_jacobian_t;
     double m_dt;
     hrp::BodyPtr m_robot;
     hrp::BodyPtr m_robotRef;

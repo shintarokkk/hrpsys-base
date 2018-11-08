@@ -137,6 +137,8 @@ private:
     std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment;
     std::map<std::string, hrp::dvector> ee_vel_w_comp_wrench;
     std::map<std::string, hrp::dvector> ee_compensation_torque;
+    std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
+    std::map<std::string, hrp::dvector> ee_vel_w_error;
     //for null space torque
     std::map<std::string, hrp::dvector> null_space_torque;
     //basic models, necessities
@@ -177,6 +179,7 @@ private:
     //for debug log
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
     std::map<std::string, std::ofstream*> debug_ee_pcf, debug_ee_ocm, debug_ee_vwcw, debug_eect, debug_nst; //for opetaional space control debug
+    std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_vwerror;
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational

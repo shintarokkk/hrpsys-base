@@ -1,3 +1,4 @@
+#include <boost/algorithm/string.hpp> //only for iequals
 #include <rtm/CorbaNaming.h>
 #include <hrpModel/Link.h>
 #include <hrpModel/Sensor.h>
@@ -164,6 +165,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     coil::vstring ltc_rgain_str = coil::split(prop["ltc_rgain"], ",");
     coil::vstring ltc_climit_str = coil::split(prop["ltc_climit"], ","); //トルク制御用の電流リミット(元のモデル等より少し小さめにすることを想定)
     coil::vstring ltc_collision_threshold_raw = coil::split(prop["ltc_collision_threshold"], "|"); //エンドエフェクタ毎に"|"で区切ってもらう
+    coil::vstring ltc_eepgain_str = coil::split(prop["ltc_ee_pgain"], ",");
+    coil::vstring ltc_eedgain_str = coil::split(prop["ltc_ee_pgain"], ",");
     std::map<std::string, std::string> base_name_map;
     if (end_effectors_str.size() > 0) {
         size_t prop_num = 10; //the number of parameters of each end effector in conf file: "ee-name, ee-link-name, base-link-name, pos.x, pos.y, pos.z, rot-axis,x, rot-axis.y, rot-axis.z, rot-angle"
@@ -297,15 +300,21 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p_ref.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665);
         hrp::Vector3 ee_pgainp_vec, ee_pgainr_vec;
         hrp::dvector ee_dgain_vec(6);
-#if 1 //for legged robot
-        ee_pgainp_vec << 120,120,120;
-        ee_pgainr_vec << 500,500,500;
-        ee_dgain_vec << 30, 30, 30, 300, 300, 300;
-#else
-        ee_pgainp_vec << 50,50,50;
-        ee_pgainr_vec << 250,250,250;
-        ee_dgain_vec << 0, 0, 0, 0, 0, 0;
-#endif
+        for (int i=0; i<3; i++){
+            coil::stringTo(ee_pgainp_vec(i), ltc_eepgain_str[i].c_str());
+            coil::stringTo(ee_pgainr_vec(i), ltc_eepgain_str[i+3].c_str());
+            coil::stringTo(ee_dgain_vec(2*i), ltc_eedgain_str[2*i].c_str());
+            coil::stringTo(ee_dgain_vec(2*i+1), ltc_eedgain_str[2*i+1].c_str());
+        }
+// #if 1 //for legged robot
+//         ee_pgainp_vec << 70,70,70;
+//         ee_pgainr_vec << 130,130,130;
+//         ee_dgain_vec << 30, 30, 30, 10, 10, 10;
+// #else
+//         ee_pgainp_vec << 50,50,50;
+//         ee_pgainr_vec << 250,250,250;
+//         ee_dgain_vec << 0, 0, 0, 0, 0, 0;
+// #endif
         p.ee_pgain_p = ee_pgainp_vec.asDiagonal();
         p.ee_pgain_r = ee_pgainr_vec.asDiagonal();
         p.ee_dgain = ee_dgain_vec.asDiagonal();
@@ -324,10 +333,16 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         hrp::dvector temp_dvec6 = hrp::dvector(6,1);
         temp_dvec6 << 1.0, 0.0, 0.0, 0.0, 0.0, 0.0;
         resist_direction[ee_name] = temp_dvec6;
+        //for ee compensation
         hrp::dmatrix temp_jacobian(6, p.manip->numJoints()), temp_inv_j_t(6, p.manip->numJoints());
         act_ee_jacobian[ee_name] = temp_jacobian;
         ref_ee_jacobian[ee_name] = temp_jacobian;
         inv_ee_jacobian_t[ee_name] = temp_inv_j_t;
+        ee_pos_comp_force[ee_name] = hrp::Vector3::Zero();
+        ee_ori_comp_moment[ee_name] = hrp::Vector3::Zero();
+        ee_vel_w_comp_wrench[ee_name] = hrp::dvector::Zero(6);
+        ee_compensation_torque[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        null_space_torque[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -1243,44 +1258,73 @@ void LimbTorqueController::DebugOutput()
                 int limbdof = manip->numJoints();
                 struct timeval nowtime;
                 gettimeofday(&nowtime, NULL);
-                *(debug_mom[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_actau[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_acbet[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_acres[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_res[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_reftq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                *(debug_f[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                if(col_param.check_mode == 3){
-                    *(debug_resdir[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                }
-                hrp::dvector external_force = hrp::dvector::Zero(6);
-                //calc external force
-                hrp::dmatrix inv_j(manip->numJoints(), 6);
-                hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
-                external_force = inv_j * gen_mom_res[ee_name];
-                for (unsigned int i=0; i<limbdof; ++i){
-                    *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
-                    *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
-                    *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
-                    *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
-                    *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
-                    *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
+                if(log_type == 1){
+                    *(debug_mom[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_actau[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_acbet[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_acres[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_res[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_reftq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_f[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     if(col_param.check_mode == 3){
-                        *(debug_resdir[ee_name]) << " " << resist_dir_torque[ee_name](i);
+                        *(debug_resdir[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     }
                 }
-                for (unsigned int i=0; i<6; ++i){
-                    *(debug_f[ee_name]) << " " << external_force(i);
+                else if(log_type == 2){
+                    *(debug_ee_pcf[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_ee_ocm[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_ee_vwcw[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_eect[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_nst[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                 }
-                *(debug_mom[ee_name]) << std::endl;
-                *(debug_actau[ee_name]) << std::endl;
-                *(debug_acbet[ee_name]) << std::endl;
-                *(debug_acres[ee_name]) << std::endl;
-                *(debug_res[ee_name]) << std::endl;
-                *(debug_reftq[ee_name]) << std::endl;
-                *(debug_f[ee_name]) << std::endl;
-                if(col_param.check_mode == 3){
-                    *(debug_resdir[ee_name]) << std::endl;
+                //calc external force
+                if(log_type == 1){
+                    hrp::dvector external_force = hrp::dvector::Zero(6);
+                    hrp::dmatrix inv_j(manip->numJoints(), 6);
+                    hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
+                    external_force = inv_j * gen_mom_res[ee_name];
+                    for (unsigned int i=0; i<limbdof; ++i){
+                        *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
+                        *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
+                        *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
+                        *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
+                        *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
+                        *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
+                        if(col_param.check_mode == 3){
+                            *(debug_resdir[ee_name]) << " " << resist_dir_torque[ee_name](i);
+                        }
+                    }
+                    for (unsigned int i=0; i<6; ++i){
+                        *(debug_f[ee_name]) << " " << external_force(i);
+                    }
+                    *(debug_mom[ee_name]) << std::endl;
+                    *(debug_actau[ee_name]) << std::endl;
+                    *(debug_acbet[ee_name]) << std::endl;
+                    *(debug_acres[ee_name]) << std::endl;
+                    *(debug_res[ee_name]) << std::endl;
+                    *(debug_reftq[ee_name]) << std::endl;
+                    *(debug_f[ee_name]) << std::endl;
+                    if(col_param.check_mode == 3){
+                        *(debug_resdir[ee_name]) << std::endl;
+                    }
+                }
+                else if(log_type == 2){
+                    for (int i=0; i<3; i++){
+                        *(debug_ee_pcf[ee_name]) << " " << ee_pos_comp_force[ee_name](i);
+                        *(debug_ee_ocm[ee_name]) << " " << ee_ori_comp_moment[ee_name](i);
+                    }
+                    for (int i=0; i<6; i++){
+                        *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
+                    }
+                    for (int i=0; i<limbdof; i++){
+                        *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
+                        *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
+                    }
+                    *(debug_ee_pcf[ee_name]) << std::endl;
+                    *(debug_ee_ocm[ee_name]) << std::endl;
+                    *(debug_ee_vwcw[ee_name]) << std::endl;
+                    *(debug_eect[ee_name]) << std::endl;
+                    *(debug_nst[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1317,7 +1361,9 @@ void LimbTorqueController::CollisionDetector2(std::map<std::string, LTParam>::it
     }
 }
 
-bool LimbTorqueController::startLog(const std::string& i_name_)
+//i_name_: base file path of log
+//i_logname_: what log to take; "collision" or "operational"
+bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
@@ -1330,15 +1376,33 @@ bool LimbTorqueController::startLog(const std::string& i_name_)
                 mkdir(basepath.c_str(), 0775);
             }
             std::string logpath = basepath + ee_name + std::string("_");
-            debug_mom[ee_name] = new std::ofstream((logpath + std::string("gen_mom.dat")).c_str());
-            debug_actau[ee_name] = new std::ofstream((logpath + std::string("ac_tau.dat")).c_str());
-            debug_acbet[ee_name] = new std::ofstream((logpath + std::string("ac_beta.dat")).c_str());
-            debug_acres[ee_name] = new std::ofstream((logpath + std::string("ac_res.dat")).c_str());
-            debug_res[ee_name] = new std::ofstream((logpath +std::string("res.dat")).c_str());
-            debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
-            debug_f[ee_name] = new std::ofstream((logpath + std::string("ext_f.dat")).c_str());
-            debug_resdir[ee_name] = new std::ofstream((logpath + std::string("resdir.dat")).c_str());
-            spit_log = true;
+            if (boost::iequals(i_logname_, "collision")){
+                debug_mom[ee_name] = new std::ofstream((logpath + std::string("gen_mom.dat")).c_str());
+                debug_actau[ee_name] = new std::ofstream((logpath + std::string("ac_tau.dat")).c_str());
+                debug_acbet[ee_name] = new std::ofstream((logpath + std::string("ac_beta.dat")).c_str());
+                debug_acres[ee_name] = new std::ofstream((logpath + std::string("ac_res.dat")).c_str());
+                debug_res[ee_name] = new std::ofstream((logpath +std::string("res.dat")).c_str());
+                debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
+                debug_f[ee_name] = new std::ofstream((logpath + std::string("ext_f.dat")).c_str());
+                debug_resdir[ee_name] = new std::ofstream((logpath + std::string("resdir.dat")).c_str());
+                log_type = 1;
+                spit_log = true;
+                std::cout << "[ltc] startLog succeed: open log stream for collision detection!!" << std::endl;
+            }
+            else if (boost::iequals(i_logname_, "operational")){
+                debug_ee_pcf[ee_name] = new std::ofstream((logpath + std::string("ee_pos_force.dat")).c_str());
+                debug_ee_ocm[ee_name] = new std::ofstream((logpath + std::string("ee_ori_moment.dat")).c_str());
+                debug_ee_vwcw[ee_name] = new std::ofstream((logpath + std::string("ee_vel_w_wrench.dat")).c_str());
+                debug_eect[ee_name] = new std::ofstream((logpath + std::string("ee_comp_torque.dat")).c_str());
+                debug_nst[ee_name] = new std::ofstream((logpath + std::string("null_space_torque.dat")).c_str());
+                log_type = 2;
+                spit_log = true;
+                std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
+            }
+            else{
+                std::cerr << "[ltc] startLog error: allowed logname are: 'collision' or 'operational'. You commanded " << i_logname_ << "." << std::endl;
+                return false;
+            }
         }
         it++;
     }
@@ -1350,19 +1414,30 @@ bool LimbTorqueController::stopLog()
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
-        if (param.is_active) {
+        if (param.is_active) { //TODO: delete ofstream when LTC goes inactive during taking log?
             std::string ee_name = it->first;
-            delete debug_mom[ee_name];
-            delete debug_actau[ee_name];
-            delete debug_acbet[ee_name];
-            delete debug_acres[ee_name];
-            delete debug_res[ee_name];
-            delete debug_reftq[ee_name];
-            delete debug_f[ee_name];
-            delete debug_resdir[ee_name];
+            if(log_type == 1){
+                delete debug_mom[ee_name];
+                delete debug_actau[ee_name];
+                delete debug_acbet[ee_name];
+                delete debug_acres[ee_name];
+                delete debug_res[ee_name];
+                delete debug_reftq[ee_name];
+                delete debug_f[ee_name];
+                delete debug_resdir[ee_name];
+            }
+            else if(log_type == 2){
+                delete debug_ee_pcf[ee_name];
+                delete debug_ee_ocm[ee_name];
+                delete debug_ee_vwcw[ee_name];
+                delete debug_eect[ee_name];
+                delete debug_nst[ee_name];
+            }
         }
         it++;
     }
+    log_type = 0;
+    std::cout << "[ltc] successfully stop log!!" << std::endl;
     spit_log = false;
     return true;
 }
@@ -1503,15 +1578,16 @@ void LimbTorqueController::calcEECompensation()
             hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
             hrp::Link* ref_el = m_robotRef->link(ee_map[ee_name].target_name);
             // calculate position, orientation error and compensation force for it
-            hrp::Vector3 ee_pos_comp_force = param.ee_pgain_p * ((ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos));
+            ee_pos_comp_force[ee_name] = param.ee_pgain_p * ((ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos));
             hrp::Matrix33 ee_ori_error_mat = ref_el->R.transpose() * act_el->R;
             Eigen::Quaternion<double> ee_ori_error_quat(ee_ori_error_mat);
             if(loop%1000==0){
+                std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
                 std::cout << "pos error is: " << std::endl << ((ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos)).transpose() << std::endl;
                 std::cout << "orien error is: " << std::endl << ee_ori_error_mat << std::endl;
             }
-            hrp::Vector3 ee_ori_comp_moment = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * param.ee_pgain_r * ee_ori_error_quat.vec();
-            ee_pos_ori_comp_force << ee_pos_comp_force, ee_ori_comp_moment;
+            ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * param.ee_pgain_r * ee_ori_error_quat.vec();
+            ee_pos_ori_comp_force << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
             // calculate translational velocity, angular velocity error
             hrp::dvector act_dq_vec(limb_dof), ref_dq_vec(limb_dof);
             for (int i=0; i<limb_dof; i++) {
@@ -1519,14 +1595,16 @@ void LimbTorqueController::calcEECompensation()
                 ref_dq_vec(i) = ref_manip->joint(i)->dq;
             }
             ee_vel_w_error << ref_ee_jacobian[ee_name] * ref_dq_vec - act_ee_jacobian[ee_name] * act_dq_vec;
+            ee_vel_w_comp_wrench[ee_name] = param.ee_dgain * ee_vel_w_error;
             // calculate joint torques
-            hrp::dvector ee_compensation_torque = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_force + param.ee_dgain * ee_vel_w_error);
+            ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_force + ee_vel_w_comp_wrench[ee_name]);
             if(loop%1000==0){
                 std::cout << "EE pgain force = " << ee_pos_ori_comp_force.transpose() << std::endl;
-                std::cout << "EE dgain force = " << (param.ee_dgain * ee_vel_w_error).transpose() << std::endl;
+                std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+                std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
             }
             for (int i=0; i<limb_dof; i++){
-                m_robot->joint(manip->joint(i)->jointId)->u += ee_compensation_torque(i);
+                m_robot->joint(manip->joint(i)->jointId)->u += ee_compensation_torque[ee_name](i);
             }
         }
         ++it;
@@ -1556,13 +1634,13 @@ void LimbTorqueController::calcNullJointDumping()
             //manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], Jinv, Jnull);
             hrp::calcSRInverse(act_ee_jacobian[ee_name], Jinv, 0.0);
             Jnull = hrp::dmatrix::Identity(limb_dof, limb_dof) - Jinv*act_ee_jacobian[ee_name];
-            hrp::dvector null_space_torque = Jnull * (param.pgain * q_error + param.dgain * dq_error);
+            null_space_torque[ee_name] = Jnull * (param.pgain * q_error + param.dgain * dq_error);
             if(loop%1000==0){
                 std::cout << "pos error = " << q_error.transpose() << std::endl;
-                std::cout << "null_tau  = " << null_space_torque.transpose() << std::endl;
+                std::cout << "null_tau  = " << null_space_torque[ee_name].transpose() << std::endl;
             }
             for (int i=0; i<limb_dof; i++){
-                m_robot->joint(manip->joint(i)->jointId)->u += null_space_torque(i);
+                m_robot->joint(manip->joint(i)->jointId)->u += null_space_torque[ee_name](i);
             }
         }
         it++;

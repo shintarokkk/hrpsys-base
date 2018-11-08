@@ -133,9 +133,12 @@ module OpenHRP
 
     /**
      * @brief start spitting log
+     * @param name: base file path to store log files: if name=="/tmp", then log files will be stored under "/tmp/LimbTorqueControllerDebug/"
+     * @param logname: what kind of log to take: "collision" or "operational"
+     * @
      * @return true if got successfully, false otherwise
      */
-    boolean startLog(in string name);
+      boolean startLog(in string name, in string logname);
 
     /**
      * @brief stop spitting log

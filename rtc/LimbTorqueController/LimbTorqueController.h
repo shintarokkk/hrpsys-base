@@ -51,7 +51,7 @@ public:
     bool getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_);
     bool getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
     bool getCollisionStatus(const std::string& i_name_, LimbTorqueControllerService::collisionStatus_out i_param_);
-    bool startLog(const std::string& i_name_);
+    bool startLog(const std::string& i_name_, const std::string& i_logname_);
     bool stopLog();
 
 protected:
@@ -133,6 +133,13 @@ private:
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
     std::map<std::string, hrp::dvector> resist_direction;
     std::map<std::string, hrp::dmatrix> act_ee_jacobian, ref_ee_jacobian, inv_ee_jacobian_t;
+    //for ee compensation
+    std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment;
+    std::map<std::string, hrp::dvector> ee_vel_w_comp_wrench;
+    std::map<std::string, hrp::dvector> ee_compensation_torque;
+    //for null space torque
+    std::map<std::string, hrp::dvector> null_space_torque;
+    //basic models, necessities
     double m_dt;
     hrp::BodyPtr m_robot;
     hrp::BodyPtr m_robotRef;
@@ -160,10 +167,6 @@ private:
     std::map<std::string, std::string> collision_link;
     std::map<std::string, bool> collision_detector_initialized, gen_imat_initialized;
     std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
-    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres;
-    std::map<std::string, std::ofstream*> debug_res, debug_reftq, debug_f;
-    std::map<std::string, std::ofstream*> debug_resdir;
-    void DebugOutput();
     std::vector<double> default_cgain, default_rgain;
 
     //collision-param
@@ -171,7 +174,12 @@ private:
     std::map<std::string, hrp::dvector> default_collision_threshold;
     int max_collision_uncheck_count;
     hrp::dvector actual_torque_vector;
+    //for debug log
+    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
+    std::map<std::string, std::ofstream*> debug_ee_pcf, debug_ee_ocm, debug_ee_vwcw, debug_eect, debug_nst; //for opetaional space control debug
+    void DebugOutput();
     bool spit_log;
+    int log_type; //1:collision, 2:operational
 };
 
 extern "C"

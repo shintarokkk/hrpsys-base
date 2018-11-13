@@ -1609,20 +1609,31 @@ void LimbTorqueController::calcEECompensation()
             hrp::Link* target = m_robot->link(ee_map[it->first].target_name);
             hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
             hrp::Link* ref_el = m_robotRef->link(ee_map[ee_name].target_name);
+            //hrp::Matrix33 eeR = act_el->R * ee_map[ee_name].localR;
+            hrp::Matrix33 eeR = ref_el->R * ee_map[ee_name].localR;
             // calculate position, orientation error and compensation force for it
             ee_pos_error[ee_name] = (ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos);
-            ee_pos_comp_force[ee_name] = param.ee_pgain_p * ee_pos_error[ee_name];
-            hrp::Matrix33 ee_ori_error_mat = ref_el->R.transpose() * act_el->R;
+            //ee_pos_comp_force[ee_name] = param.ee_pgain_p * ee_pos_error[ee_name];
+            ee_pos_comp_force[ee_name] = eeR * param.ee_pgain_p * eeR.transpose() * ee_pos_error[ee_name];
+            hrp::Matrix33 ee_ori_error_mat = (ref_el->R*ee_map[ee_name].localR).transpose() * (act_el->R*ee_map[ee_name].localR);
             ee_ori_error[ee_name] = hrp::rpyFromRot(ee_ori_error_mat); //only for debug
             Eigen::Quaternion<double> ee_ori_error_quat(ee_ori_error_mat);
+
+            // orientation feedback method 1 (seems to work well)
+            Eigen::Quaternion<double> act_ee_quat(act_el->R*ee_map[ee_name].localR), ref_ee_quat(ref_el->R*ee_map[ee_name].localR);
+            hrp::Vector3 ee_ori_error_os = ref_ee_quat.w()*act_ee_quat.vec() - act_ee_quat.w()*ref_ee_quat.vec() + ref_ee_quat.vec().cross(act_ee_quat.vec());
+            ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error_os;
+
             if(loop%1000==0){
                 std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
                 std::cout << "pos error is: " << std::endl << ee_pos_error[ee_name].transpose() << std::endl;
                 std::cout << "orientation error is: " << std::endl << ee_ori_error[ee_name].transpose() << std::endl;
             }
-            //ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * param.ee_pgain_r * ee_ori_error_quat.vec();
-            //ee_ori_comp_moment[ee_name] = - 2.0 * ee_ori_error_mat * (ee_ori_error_quat.w() * param.ee_pgain_r * ee_ori_error_quat.vec() + ee_ori_error_quat.vec().cross(param.ee_pgain_r * ee_ori_error_quat.vec())); //alternative
-            ee_ori_comp_moment[ee_name] = - 2.0 * act_el->R*ee_map[ee_name].localR * (ee_ori_error_quat.w() * param.ee_pgain_r * ee_ori_error_quat.vec() + ee_ori_error_quat.vec().cross(param.ee_pgain_r * ee_ori_error_quat.vec())); //alternative
+
+            // orientation feedback method 2 (somehow control go wrong in some cases)
+            //ee_ori_error_quat = act_ee_quat.conjugate() * ref_ee_quat;
+            //ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * (eeR * param.ee_pgain_r * eeR.transpose()) * ee_ori_error_quat.vec();
+
             ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
             // calculate translational velocity, angular velocity error
             current_act_ee_rot[ee_name] = act_el->R * ee_map[ee_name].localR;
@@ -1647,8 +1658,10 @@ void LimbTorqueController::calcEECompensation()
             ee_vel_error[ee_name] = (ee_pos_error[ee_name] - prev_ee_pos_error[ee_name]) / RTC_PERIOD;
             ee_w_error[ee_name] = ref_ee_w - act_ee_w;
             // multiply gain to error
-            ee_vel_comp_force[ee_name] = param.ee_dgain_p * ee_vel_error[ee_name];
-            ee_w_comp_moment[ee_name] = param.ee_dgain_r * ee_w_error[ee_name];
+            // ee_vel_comp_force[ee_name] = param.ee_dgain_p * ee_vel_error[ee_name];
+            // ee_w_comp_moment[ee_name] = param.ee_dgain_r * ee_w_error[ee_name];
+            ee_vel_comp_force[ee_name] = eeR * param.ee_dgain_p * eeR.transpose() * ee_vel_error[ee_name];
+            ee_w_comp_moment[ee_name] = eeR * param.ee_dgain_r * eeR.transpose() * ee_w_error[ee_name];
             ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
             // map wrench to joint torque
             ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);

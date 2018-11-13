@@ -180,8 +180,9 @@ private:
     hrp::dvector actual_torque_vector;
     //for debug log
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
-    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst; //for opetaional space control debug
+    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa; //for opetaional space control debug
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
+    std::map<std::string, hrp::dvector> reftq_bfr_mmavoidance, reftq_aftr_mmavoidance;
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational

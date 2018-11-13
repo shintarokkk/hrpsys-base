@@ -355,6 +355,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         prev_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
         ee_vel_error[ee_name] = hrp::dvector::Zero(6);
         ee_w_error[ee_name] = hrp::dvector::Zero(6);
+        reftq_bfr_mmavoidance[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        reftq_aftr_mmavoidance[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         oscontrol_initialized[ee_name] = false;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
@@ -770,6 +772,7 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
+        std::string ee_name = it->first;
         if (param.is_active) {
             if (DEBUGP) {
                 std::cerr << "ここにデバッグメッセージを流す" << std::endl;
@@ -793,6 +796,7 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                     if (loop%200 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }
+                reftq_aftr_mmavoidance[ee_name](i) = manip->joint(i)->u;
             }
         }
         ++it;
@@ -1296,6 +1300,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ee_orierror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_ee_velerror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_ee_werror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_reftqb[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_reftqa[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1342,6 +1348,8 @@ void LimbTorqueController::DebugOutput()
                     for (int i=0; i<limbdof; i++){
                         *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
                         *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
+                        *(debug_reftqb[ee_name]) << " " << reftq_bfr_mmavoidance[ee_name](i);
+                        *(debug_reftqa[ee_name]) << " " << reftq_aftr_mmavoidance[ee_name](i);
                     }
                     *(debug_ee_pocw[ee_name]) << std::endl;
                     *(debug_ee_vwcw[ee_name]) << std::endl;
@@ -1351,6 +1359,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ee_orierror[ee_name]) << std::endl;
                     *(debug_ee_velerror[ee_name]) << std::endl;
                     *(debug_ee_werror[ee_name]) << std::endl;
+                    *(debug_reftqb[ee_name]) << std::endl;
+                    *(debug_reftqa[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1420,10 +1430,12 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_ee_vwcw[ee_name] = new std::ofstream((logpath + std::string("ee_vel_w_wrench.dat")).c_str());
                 debug_eect[ee_name] = new std::ofstream((logpath + std::string("ee_comp_torque.dat")).c_str());
                 debug_nst[ee_name] = new std::ofstream((logpath + std::string("null_space_torque.dat")).c_str());
-                debug_ee_poserror[ee_name]  = new std::ofstream((logpath + std::string("ee_pos_error.dat")).c_str());
-                debug_ee_orierror[ee_name]  = new std::ofstream((logpath + std::string("ee_ori_error.dat")).c_str());
-                debug_ee_velerror[ee_name]  = new std::ofstream((logpath + std::string("ee_vel_error.dat")).c_str());
-                debug_ee_werror[ee_name]  = new std::ofstream((logpath + std::string("ee_w_error.dat")).c_str());
+                debug_ee_poserror[ee_name] = new std::ofstream((logpath + std::string("ee_pos_error.dat")).c_str());
+                debug_ee_orierror[ee_name] = new std::ofstream((logpath + std::string("ee_ori_error.dat")).c_str());
+                debug_ee_velerror[ee_name] = new std::ofstream((logpath + std::string("ee_vel_error.dat")).c_str());
+                debug_ee_werror[ee_name] = new std::ofstream((logpath + std::string("ee_w_error.dat")).c_str());
+                debug_reftqb[ee_name] = new std::ofstream((logpath  + std::string("reftq_before_minmaxavoidance.dat")).c_str());
+                debug_reftqa[ee_name] = new std::ofstream((logpath  + std::string("reftq_after_minmaxavoidance.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -1464,6 +1476,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_ee_orierror[ee_name];
                 delete debug_ee_velerror[ee_name];
                 delete debug_ee_werror[ee_name];
+                delete debug_reftqa[ee_name];
+                delete debug_reftqb[ee_name];
             }
         }
         it++;
@@ -1713,6 +1727,7 @@ void LimbTorqueController::calcNullJointDumping()
             }
             for (int i=0; i<limb_dof; i++){
                 m_robot->joint(manip->joint(i)->jointId)->u += null_space_torque[ee_name](i);
+                reftq_bfr_mmavoidance[ee_name](i) = m_robot->joint(manip->joint(i)->jointId)->u;
             }
         }
         it++;

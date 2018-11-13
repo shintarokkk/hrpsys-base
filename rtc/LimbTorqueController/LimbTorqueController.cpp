@@ -513,7 +513,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            //calcJointDumpingTorque(); //関節角度ダンピング
            calcEECompensation();
            calcNullJointDumping();
-           //calcMinMaxAvoidanceTorque();
+           calcMinMaxAvoidanceTorque();
 
        }
        else if (torque_output_type == REF_TORQUE) {
@@ -615,11 +615,10 @@ void LimbTorqueController::getActualParameters()
         }
         qold[i] = m_qCurrent.data[i];
     }
-    m_robot->rootLink()->p = hrp::Vector3::Zero();
+    m_robot->rootLink()->p = target_root_p;
     m_robot->rootLink()->R = target_root_R;
     m_robot->calcForwardKinematics(); //is this part necessary?
 #if 1 //for legged robot
-    m_robot->rootLink()->p(2) = m_robotRef->rootLink()->p(2);
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
     hrp::Matrix33 senR = sen->link->R * sen->localR;
     hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
@@ -791,7 +790,7 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                     double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
                     double avoid_torque = max_torque/margin*(min_angle+margin - now_angle);
                     manip->joint(i)->u = std::max(manip->joint(i)->u, avoid_torque);
-                    if (loop%500 == 0){
+                    if (loop%200 == 0){
                         std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
                 }
             }
@@ -1617,22 +1616,22 @@ void LimbTorqueController::calcEECompensation()
             ee_pos_comp_force[ee_name] = eeR * param.ee_pgain_p * eeR.transpose() * ee_pos_error[ee_name];
             hrp::Matrix33 ee_ori_error_mat = (ref_el->R*ee_map[ee_name].localR).transpose() * (act_el->R*ee_map[ee_name].localR);
             ee_ori_error[ee_name] = hrp::rpyFromRot(ee_ori_error_mat); //only for debug
-            Eigen::Quaternion<double> ee_ori_error_quat(ee_ori_error_mat);
 
             // orientation feedback method 1 (seems to work well)
+            // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
             Eigen::Quaternion<double> act_ee_quat(act_el->R*ee_map[ee_name].localR), ref_ee_quat(ref_el->R*ee_map[ee_name].localR);
             hrp::Vector3 ee_ori_error_os = ref_ee_quat.w()*act_ee_quat.vec() - act_ee_quat.w()*ref_ee_quat.vec() + ref_ee_quat.vec().cross(act_ee_quat.vec());
             ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error_os;
+            // orientation feedback method 2 (somehow control go wrong in some cases)
+            // F. Caccavale et al., "Six-DOF Impedance Control of Dual-Arm Cooperative Manipulators," in IEEE/ASME Transactions on Mechatronics, vol.13, no.5, pp.576-586, Oct. 2008.
+            // Eigen::Quaternion<double> ee_ori_error_quat = ref_ee_quat.conjugate() * act_ee_quat;
+            // ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * (eeR * param.ee_pgain_r * eeR.transpose()) * ee_ori_error_quat.vec();
 
             if(loop%1000==0){
                 std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
                 std::cout << "pos error is: " << std::endl << ee_pos_error[ee_name].transpose() << std::endl;
                 std::cout << "orientation error is: " << std::endl << ee_ori_error[ee_name].transpose() << std::endl;
             }
-
-            // orientation feedback method 2 (somehow control go wrong in some cases)
-            //ee_ori_error_quat = act_ee_quat.conjugate() * ref_ee_quat;
-            //ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * (eeR * param.ee_pgain_r * eeR.transpose()) * ee_ori_error_quat.vec();
 
             ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
             // calculate translational velocity, angular velocity error
@@ -1706,9 +1705,7 @@ void LimbTorqueController::calcNullJointDumping()
                 dq_error(i) = ref_manip->joint(i)->dq - manip->joint(i)->dq;
             }
             hrp::dmatrix Jinv(limb_dof, 6), Jnull(limb_dof, limb_dof);
-            //manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], Jinv, Jnull);
-            hrp::calcSRInverse(act_ee_jacobian[ee_name], Jinv, 0.0);
-            Jnull = hrp::dmatrix::Identity(limb_dof, limb_dof) - Jinv*act_ee_jacobian[ee_name];
+            manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], Jinv, Jnull);
             null_space_torque[ee_name] = Jnull * (param.pgain * q_error + param.dgain * dq_error);
             if(loop%1000==0){
                 std::cout << "pos error = " << q_error.transpose() << std::endl;

@@ -44,6 +44,21 @@ static const char* limbtorquecontroller_spec[] =
     };
 // </rtc-template>
 
+std::ostream& operator<<(std::ostream& os, const Vector3_Filter& obj)
+{
+    os << "[";
+    for (int i=0; i<2*obj.N; i++){
+        os << "[" << std::setw(6) << obj.x[i];
+        os << " ";
+        os << std::setw(6) << obj.y[i];
+        os << " ";
+        os << std::setw(6) << obj.z[i];
+        os << "], ";
+    }
+    os << "]";
+    return os;
+}
+
 LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
     : RTC::DataFlowComponentBase(manager),
       m_qCurrentIn("qCurrent", m_qCurrent), //センサ値:重力補償用
@@ -363,6 +378,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ee_w_error[ee_name] = hrp::dvector::Zero(6);
         reftq_bfr_mmavoidance[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         reftq_aftr_mmavoidance[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        ee_vel_filter[ee_name] = {5, RTC_PERIOD};
         oscontrol_initialized[ee_name] = false;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
@@ -1673,11 +1689,14 @@ void LimbTorqueController::calcEECompensation()
             if(!oscontrol_initialized[ee_name]){
                 //prev_ee_pos_error[ee_name] = ee_pos_error[ee_name];
                 prev_act_ee_pos[ee_name] = current_act_ee_pos[ee_name];
+                ee_vel_filter[ee_name].fill(current_act_ee_pos[ee_name]);
                 prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
                 prev_act_ee_rot[ee_name] = current_act_ee_rot[ee_name];
                 prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
                 oscontrol_initialized[ee_name] = true;
             }
+            // std::cout << "[Debug for Vector3 filter!!!]" << std::endl;
+            // std::cout << ee_vel_filter[ee_name] << std::endl;
             hrp::Matrix33 act_ee_w_omega_mat = ((current_act_ee_rot[ee_name] - prev_act_ee_rot[ee_name])/RTC_PERIOD) * current_act_ee_rot[ee_name].transpose();
             hrp::Matrix33 ref_ee_w_omega_mat = ((current_ref_ee_rot[ee_name] - prev_ref_ee_rot[ee_name])/RTC_PERIOD) * current_ref_ee_rot[ee_name].transpose();
             hrp::Vector3 act_ee_w, ref_ee_w;
@@ -1690,7 +1709,9 @@ void LimbTorqueController::calcEECompensation()
                 ((ref_ee_w_omega_mat(0,2) - ref_ee_w_omega_mat(2,0)) / 2),
                 ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
             //ee_vel_error[ee_name] = (ee_pos_error[ee_name] - prev_ee_pos_error[ee_name]) / RTC_PERIOD;
-            act_ee_vel[ee_name] = (current_act_ee_pos[ee_name] - prev_act_ee_pos[ee_name]) / RTC_PERIOD;
+            // act_ee_vel[ee_name] = (current_act_ee_pos[ee_name] - prev_act_ee_pos[ee_name]) / RTC_PERIOD;
+            ee_vel_filter[ee_name].push(current_act_ee_pos[ee_name]);
+            act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
             ref_ee_vel[ee_name] = (current_ref_ee_pos[ee_name] - prev_ref_ee_pos[ee_name]) / RTC_PERIOD;
             ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
             ee_w_error[ee_name] = ref_ee_w - act_ee_w;

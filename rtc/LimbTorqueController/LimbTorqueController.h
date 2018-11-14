@@ -137,8 +137,11 @@ private:
     std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment, ee_vel_comp_force, ee_w_comp_moment;
     std::map<std::string, hrp::dvector> ee_pos_ori_comp_wrench, ee_vel_w_comp_wrench;
     std::map<std::string, hrp::dvector> ee_compensation_torque;
-    std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error, prev_ee_pos_error;
+    //std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error, prev_ee_pos_error;
+    std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_act_ee_rot, prev_ref_ee_rot;
+    std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_act_ee_pos, prev_ref_ee_pos;
+    std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel;
     std::map<std::string, hrp::Vector3> ee_vel_error, ee_w_error;
     std::map<std::string, bool> oscontrol_initialized;
     //for null space torque
@@ -180,7 +183,7 @@ private:
     hrp::dvector actual_torque_vector;
     //for debug log
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
-    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa; //for opetaional space control debug
+    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa, debug_acteevel, debug_refeevel; //for opetaional space control debug
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
     std::map<std::string, hrp::dvector> reftq_bfr_mmavoidance, reftq_aftr_mmavoidance;
     void DebugOutput();

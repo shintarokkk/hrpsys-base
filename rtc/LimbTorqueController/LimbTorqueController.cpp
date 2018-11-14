@@ -348,7 +348,13 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         null_space_torque[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         ee_pos_error[ee_name] = hrp::Vector3::Zero();
         ee_ori_error[ee_name] = hrp::Vector3::Zero();
-        prev_ee_pos_error[ee_name] = hrp::Vector3::Zero();
+        // prev_ee_pos_error[ee_name] = hrp::Vector3::Zero();
+        current_act_ee_pos[ee_name] = hrp::Vector3::Zero();
+        current_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
+        prev_act_ee_pos[ee_name] = hrp::Vector3::Zero();
+        prev_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
+        act_ee_vel[ee_name] = hrp::Vector3::Zero();
+        ref_ee_vel[ee_name] = hrp::Vector3::Zero();
         current_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
         current_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
         prev_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
@@ -1302,6 +1308,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ee_werror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_reftqb[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_reftqa[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_acteevel[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_refeevel[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1340,6 +1348,8 @@ void LimbTorqueController::DebugOutput()
                         *(debug_ee_orierror[ee_name]) << " " << ee_ori_error[ee_name](i);
                         *(debug_ee_velerror[ee_name]) << " " << ee_vel_error[ee_name](i);
                         *(debug_ee_werror[ee_name]) << " " << ee_w_error[ee_name](i);
+                        *(debug_acteevel[ee_name]) << " " << act_ee_vel[ee_name](i);
+                        *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
                     }
                     for (int i=0; i<6; i++){
                         *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
@@ -1361,6 +1371,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ee_werror[ee_name]) << std::endl;
                     *(debug_reftqb[ee_name]) << std::endl;
                     *(debug_reftqa[ee_name]) << std::endl;
+                    *(debug_acteevel[ee_name]) << std::endl;
+                    *(debug_refeevel[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1436,6 +1448,8 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_ee_werror[ee_name] = new std::ofstream((logpath + std::string("ee_w_error.dat")).c_str());
                 debug_reftqb[ee_name] = new std::ofstream((logpath  + std::string("reftq_before_minmaxavoidance.dat")).c_str());
                 debug_reftqa[ee_name] = new std::ofstream((logpath  + std::string("reftq_after_minmaxavoidance.dat")).c_str());
+                debug_acteevel[ee_name] = new std::ofstream((logpath  + std::string("act_ee_vel.dat")).c_str());
+                debug_refeevel[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_vel.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -1478,6 +1492,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_ee_werror[ee_name];
                 delete debug_reftqa[ee_name];
                 delete debug_reftqb[ee_name];
+                delete debug_acteevel[ee_name];
+                delete debug_refeevel[ee_name];
             }
         }
         it++;
@@ -1625,7 +1641,10 @@ void LimbTorqueController::calcEECompensation()
             //hrp::Matrix33 eeR = act_el->R * ee_map[ee_name].localR;
             hrp::Matrix33 eeR = ref_el->R * ee_map[ee_name].localR;
             // calculate position, orientation error and compensation force for it
-            ee_pos_error[ee_name] = (ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos);
+            //ee_pos_error[ee_name] = (ref_el->p + ref_el->R*ee_map[ee_name].localPos) - (act_el->p + act_el->R*ee_map[ee_name].localPos);
+            current_act_ee_pos[ee_name] = act_el->p + act_el->R*ee_map[ee_name].localPos;
+            current_ref_ee_pos[ee_name] = ref_el->p + ref_el->R*ee_map[ee_name].localPos;
+            ee_pos_error[ee_name] = current_ref_ee_pos[ee_name] - current_act_ee_pos[ee_name];
             //ee_pos_comp_force[ee_name] = param.ee_pgain_p * ee_pos_error[ee_name];
             ee_pos_comp_force[ee_name] = eeR * param.ee_pgain_p * eeR.transpose() * ee_pos_error[ee_name];
             hrp::Matrix33 ee_ori_error_mat = (ref_el->R*ee_map[ee_name].localR).transpose() * (act_el->R*ee_map[ee_name].localR);
@@ -1652,7 +1671,9 @@ void LimbTorqueController::calcEECompensation()
             current_act_ee_rot[ee_name] = act_el->R * ee_map[ee_name].localR;
             current_ref_ee_rot[ee_name] = ref_el->R * ee_map[ee_name].localR;
             if(!oscontrol_initialized[ee_name]){
-                prev_ee_pos_error[ee_name] = ee_pos_error[ee_name];
+                //prev_ee_pos_error[ee_name] = ee_pos_error[ee_name];
+                prev_act_ee_pos[ee_name] = current_act_ee_pos[ee_name];
+                prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
                 prev_act_ee_rot[ee_name] = current_act_ee_rot[ee_name];
                 prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
                 oscontrol_initialized[ee_name] = true;
@@ -1668,7 +1689,10 @@ void LimbTorqueController::calcEECompensation()
                 ((ref_ee_w_omega_mat(2,1) - ref_ee_w_omega_mat(1,2)) / 2),
                 ((ref_ee_w_omega_mat(0,2) - ref_ee_w_omega_mat(2,0)) / 2),
                 ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
-            ee_vel_error[ee_name] = (ee_pos_error[ee_name] - prev_ee_pos_error[ee_name]) / RTC_PERIOD;
+            //ee_vel_error[ee_name] = (ee_pos_error[ee_name] - prev_ee_pos_error[ee_name]) / RTC_PERIOD;
+            act_ee_vel[ee_name] = (current_act_ee_pos[ee_name] - prev_act_ee_pos[ee_name]) / RTC_PERIOD;
+            ref_ee_vel[ee_name] = (current_ref_ee_pos[ee_name] - prev_ref_ee_pos[ee_name]) / RTC_PERIOD;
+            ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
             ee_w_error[ee_name] = ref_ee_w - act_ee_w;
             // multiply gain to error
             // ee_vel_comp_force[ee_name] = param.ee_dgain_p * ee_vel_error[ee_name];
@@ -1679,7 +1703,9 @@ void LimbTorqueController::calcEECompensation()
             // map wrench to joint torque
             ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
             // save current position, rotation as previous
-            prev_ee_pos_error[ee_name] = ee_pos_error[ee_name];
+            //prev_ee_pos_error[ee_name] = ee_pos_error[ee_name];
+            prev_act_ee_pos[ee_name] = current_act_ee_pos[ee_name];
+            prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
             prev_act_ee_rot[ee_name] = current_act_ee_rot[ee_name];
             prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
             // debug output

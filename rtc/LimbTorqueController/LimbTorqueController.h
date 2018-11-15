@@ -83,6 +83,50 @@ struct Vector3_Filter
     };
 };
 
+// minimum-root-mean-square-error filter for first order differenciation of Vector3
+// .      3x_k - 4x_(k-N) + x_(k-2N)
+// x_k = -----------------------------
+//                2N*dt
+// N: half the window size
+template <typename T>
+class RMSfilter
+{
+public:
+    RMSfilter() {}
+
+    RMSfilter(unsigned int n, double t)
+    {
+        N_ = n;
+        dt_ = t;
+        data_que_.resize(2*N_);
+    }
+
+    void push(const T& obj)
+    {
+        data_que_.pop_front();
+        data_que_.push_back(obj);
+    }
+    void fill(const T& obj)
+    {
+        for (int i=0; i<2*N_; i++){
+            push(obj);
+        }
+    }
+    T get_velocity()
+    {
+        T velocity = (3.0*data_que_[2*N_-1] - 4.0*data_que_[N_-1] + data_que_[0]) / (2.0*N_*dt_);
+        return velocity;
+    }
+    int N() const { return N_; }
+    double dt() const { return dt_; }
+    std::deque<T> data_que() const { return data_que_; }
+
+private:
+    int N_; // window_size
+    double dt_;
+    std::deque<T> data_que_;
+};
+
 class LimbTorqueController
  : public RTC::DataFlowComponentBase
 {
@@ -192,13 +236,15 @@ private:
     std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment, ee_vel_comp_force, ee_w_comp_moment;
     std::map<std::string, hrp::dvector> ee_pos_ori_comp_wrench, ee_vel_w_comp_wrench;
     std::map<std::string, hrp::dvector> ee_compensation_torque;
-    //std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error, prev_ee_pos_error;
+    //std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_act_ee_rot, prev_ref_ee_rot;
     std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_act_ee_pos, prev_ref_ee_pos;
-    std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel;
+    std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel, act_ee_w, ref_ee_w;
+    std::map<std::string, hrp::dvector> dq_for_each_arm; //for debug log
     std::map<std::string, hrp::Vector3> ee_vel_error, ee_w_error;
-    std::map<std::string, Vector3_Filter> ee_vel_filter;
+    std::map<std::string, RMSfilter<hrp::Vector3> > ee_vel_filter;
+    std::map<std::string, RMSfilter<hrp::Matrix33> > ee_w_filter;
     std::map<std::string, bool> oscontrol_initialized;
     //for null space torque
     std::map<std::string, hrp::dvector> null_space_torque;
@@ -239,7 +285,7 @@ private:
     hrp::dvector actual_torque_vector;
     //for debug log
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
-    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa, debug_acteevel, debug_refeevel; //for opetaional space control debug
+    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew, debug_dq; //for opetaional space control debug
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
     std::map<std::string, hrp::dvector> reftq_bfr_mmavoidance, reftq_aftr_mmavoidance;
     void DebugOutput();

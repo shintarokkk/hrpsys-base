@@ -29,60 +29,6 @@
 // <rtc-template block="service_impl_h">
 #include "LimbTorqueControllerService_impl.h"
 
-// minimum-root-mean-square filter for first order differenciation of Vector3
-// .      3x_k - 4x_(k-N) + x_(k-2N)
-// x_k = -----------------------------
-//                2N*dt
-// N: half the window size
-struct Vector3_Filter
-{
-    int N; // window_size
-    double dt;
-    std::deque<double> x, y, z;
-
-    Vector3_Filter()
-    {
-        N = 1;
-        dt = 0.002;
-        x.resize(2*N);
-        y.resize(2*N);
-        z.resize(2*N);
-    };
-
-    Vector3_Filter (int n, double t) // TODO let this if n<=0
-    {
-        N = n;
-        dt = t;
-        x.resize(2*n);
-        y.resize(2*n);
-        z.resize(2*n);
-    };
-
-    void push(hrp::Vector3 vec_in)
-    {
-        x.pop_front();
-        y.pop_front();
-        z.pop_front();
-        x.push_back(vec_in(0));
-        y.push_back(vec_in(1));
-        z.push_back(vec_in(2));
-    };
-    void fill(hrp::Vector3 vec_in)
-    {
-        for (int i=0; i<2*N; i++){
-            push(vec_in);
-        }
-    };
-    hrp::Vector3 get_velocity(){
-        double vx, vy, vz;
-        vx = (3.0*x[2*N-1] - 4.0*x[N-1] + x[0]) / (2.0*N*dt);
-        vy = (3.0*y[2*N-1] - 4.0*y[N-1] + y[0]) / (2.0*N*dt);
-        vz = (3.0*z[2*N-1] - 4.0*z[N-1] + z[0]) / (2.0*N*dt);
-        hrp::Vector3 velocity(vx, vy, vz);
-        return velocity;
-    };
-};
-
 // minimum-root-mean-square-error filter for first order differenciation of Vector3
 // .      3x_k - 4x_(k-N) + x_(k-2N)
 // x_k = -----------------------------
@@ -238,8 +184,8 @@ private:
     std::map<std::string, hrp::dvector> ee_compensation_torque;
     //std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
-    std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_act_ee_rot, prev_ref_ee_rot;
-    std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_act_ee_pos, prev_ref_ee_pos;
+    std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_ref_ee_rot;
+    std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_ref_ee_pos;
     std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel, act_ee_w, ref_ee_w;
     std::map<std::string, hrp::dvector> dq_for_each_arm; //for debug log
     std::map<std::string, hrp::Vector3> ee_vel_error, ee_w_error;

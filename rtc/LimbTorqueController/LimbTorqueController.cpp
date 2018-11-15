@@ -44,21 +44,6 @@ static const char* limbtorquecontroller_spec[] =
     };
 // </rtc-template>
 
-std::ostream& operator<<(std::ostream& os, const Vector3_Filter& obj)
-{
-    os << "[";
-    for (int i=0; i<2*obj.N; i++){
-        os << "[" << std::setw(6) << obj.x[i];
-        os << " ";
-        os << std::setw(6) << obj.y[i];
-        os << " ";
-        os << std::setw(6) << obj.z[i];
-        os << "], ";
-    }
-    os << "]";
-    return os;
-}
-
 template<typename T>
 std::ostream& operator<<(std::ostream& os, const RMSfilter<T>& fil)
 {
@@ -69,7 +54,6 @@ std::ostream& operator<<(std::ostream& os, const RMSfilter<T>& fil)
     os << "]";
     return os;
 }
-
 
 LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
     : RTC::DataFlowComponentBase(manager),
@@ -332,15 +316,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             coil::stringTo(ee_dgainp_vec(i), ltc_eedgain_str[i].c_str());
             coil::stringTo(ee_dgainr_vec(i), ltc_eedgain_str[i+3].c_str());
         }
-// #if 1 //for legged robot
-//         ee_pgainp_vec << 70,70,70;
-//         ee_pgainr_vec << 130,130,130;
-//         ee_dgain_vec << 30, 30, 30, 10, 10, 10;
-// #else
-//         ee_pgainp_vec << 50,50,50;
-//         ee_pgainr_vec << 250,250,250;
-//         ee_dgain_vec << 0, 0, 0, 0, 0, 0;
-// #endif
         p.ee_pgain_p = ee_pgainp_vec.asDiagonal();
         p.ee_pgain_r = ee_pgainr_vec.asDiagonal();
         p.ee_dgain_p = ee_dgainp_vec.asDiagonal();
@@ -377,7 +352,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ee_ori_error[ee_name] = hrp::Vector3::Zero();
         current_act_ee_pos[ee_name] = hrp::Vector3::Zero();
         current_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
-        prev_act_ee_pos[ee_name] = hrp::Vector3::Zero();
         prev_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
         act_ee_vel[ee_name] = hrp::Vector3::Zero();
         ref_ee_vel[ee_name] = hrp::Vector3::Zero();
@@ -386,7 +360,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         dq_for_each_arm[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         current_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
         current_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
-        prev_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
         prev_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
         ee_vel_error[ee_name] = hrp::dvector::Zero(6);
         ee_w_error[ee_name] = hrp::dvector::Zero(6);
@@ -1718,26 +1691,23 @@ void LimbTorqueController::calcEECompensation()
             // calculate translational velocity, angular velocity error
             current_act_ee_rot[ee_name] = act_el->R * ee_map[ee_name].localR;
             current_ref_ee_rot[ee_name] = ref_el->R * ee_map[ee_name].localR;
+            // set current paramters to previous parameters (run only at first)
             if(!oscontrol_initialized[ee_name]){
-#if 1 //with filter
                 ee_vel_filter[ee_name].fill(current_act_ee_pos[ee_name]);
                 ee_w_filter[ee_name].fill(current_act_ee_rot[ee_name]);
-#else //without filter (for comparison)
-                prev_act_ee_rot[ee_name] = current_act_ee_rot[ee_name];
-                prev_act_ee_pos[ee_name] = current_act_ee_pos[ee_name];
-#endif
                 prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
                 prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
                 oscontrol_initialized[ee_name] = true;
             }
-            // std::cout << "[Debug for Vector3 filter!!!]" << std::endl;
-            // std::cout << ee_vel_filter[ee_name] << std::endl;
-#if 1 //with filter
+            // set current position, rotation to the head of filters
+            ee_vel_filter[ee_name].push(current_act_ee_pos[ee_name]);
             ee_w_filter[ee_name].push(current_act_ee_rot[ee_name]);
+            // calculate ee velocity
+            act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
+            ref_ee_vel[ee_name] = (current_ref_ee_pos[ee_name] - prev_ref_ee_pos[ee_name]) / RTC_PERIOD;
+            ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
+            // callulate ee angular velocity
             hrp::Matrix33 act_ee_w_omega_mat = ee_w_filter[ee_name].get_velocity() * current_act_ee_rot[ee_name].transpose();
-#else //without filter (for comparison)
-            hrp::Matrix33 act_ee_w_omega_mat = ((current_act_ee_rot[ee_name] - prev_act_ee_rot[ee_name])/RTC_PERIOD) * current_act_ee_rot[ee_name].transpose();
-#endif
             hrp::Matrix33 ref_ee_w_omega_mat = ((current_ref_ee_rot[ee_name] - prev_ref_ee_rot[ee_name])/RTC_PERIOD) * current_ref_ee_rot[ee_name].transpose();
             act_ee_w[ee_name] <<
                 ((act_ee_w_omega_mat(2,1) - act_ee_w_omega_mat(1,2)) / 2),
@@ -1747,15 +1717,6 @@ void LimbTorqueController::calcEECompensation()
                 ((ref_ee_w_omega_mat(2,1) - ref_ee_w_omega_mat(1,2)) / 2),
                 ((ref_ee_w_omega_mat(0,2) - ref_ee_w_omega_mat(2,0)) / 2),
                 ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
-#if 1 //with filter
-            ee_vel_filter[ee_name].push(current_act_ee_pos[ee_name]);
-            ee_w_filter[ee_name].push(current_act_ee_rot[ee_name]);
-            act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
-#else //without filter (for comparison)
-            act_ee_vel[ee_name] = (current_act_ee_pos[ee_name] - prev_act_ee_pos[ee_name]) / RTC_PERIOD;
-#endif
-            ref_ee_vel[ee_name] = (current_ref_ee_pos[ee_name] - prev_ref_ee_pos[ee_name]) / RTC_PERIOD;
-            ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
             ee_w_error[ee_name] = ref_ee_w[ee_name] - act_ee_w[ee_name];
             // multiply gain to error
             // ee_vel_comp_force[ee_name] = param.ee_dgain_p * ee_vel_error[ee_name];
@@ -1766,11 +1727,6 @@ void LimbTorqueController::calcEECompensation()
             // map wrench to joint torque
             ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
             // save current position, rotation as previous
-#if 1 //with filter
-#else //without filter (for comparison)
-            prev_act_ee_pos[ee_name] = current_act_ee_pos[ee_name];
-            prev_act_ee_rot[ee_name] = current_act_ee_rot[ee_name];
-#endif
             prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
             prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
             // debug output
@@ -1811,7 +1767,7 @@ void LimbTorqueController::calcNullJointDumping()
                 dq_for_each_arm[ee_name][i] = manip->joint(i)->dq; //for debug log
             }
             hrp::dmatrix Jinv(limb_dof, 6), Jnull(limb_dof, limb_dof);
-            manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], Jinv, Jnull);
+            manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], Jinv, Jnull); // including min/max avoidance
             null_space_torque[ee_name] = Jnull * (param.pgain * q_error + param.dgain * dq_error);
             if(loop%1000==0){
                 std::cout << "pos error = " << q_error.transpose() << std::endl;

@@ -527,7 +527,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            //calcJointDumpingTorque(); //関節角度ダンピング
            calcEECompensation();
            calcNullJointDumping();
-           calcMinMaxAvoidanceTorque();
+           //calcMinMaxAvoidanceTorque(); //Null Spaceで考慮しているので使わない
 
        }
        else if (torque_output_type == REF_TORQUE) {
@@ -1672,10 +1672,15 @@ void LimbTorqueController::calcEECompensation()
             ee_ori_error[ee_name] = hrp::rpyFromRot(ee_ori_error_mat); //only for debug
 
             // orientation feedback method 1 (seems to work well)
-            // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
             Eigen::Quaternion<double> act_ee_quat(act_el->R*ee_map[ee_name].localR), ref_ee_quat(ref_el->R*ee_map[ee_name].localR);
-            hrp::Vector3 ee_ori_error_os = ref_ee_quat.w()*act_ee_quat.vec() - act_ee_quat.w()*ref_ee_quat.vec() + ref_ee_quat.vec().cross(act_ee_quat.vec());
-            ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error_os;
+            // check and correct jump of quaternion
+            if((ref_ee_quat.conjugate()*act_ee_quat).w() < 0){
+                Eigen::Quaternion<double> negated_ref(-ref_ee_quat.w(), -ref_ee_quat.x(), -ref_ee_quat.y(), -ref_ee_quat.z());
+                ref_ee_quat = negated_ref;
+            }
+            // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
+            hrp::Vector3 ee_ori_error_vec = ref_ee_quat.w()*act_ee_quat.vec() - act_ee_quat.w()*ref_ee_quat.vec() + ref_ee_quat.vec().cross(act_ee_quat.vec());
+            ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error_vec;
             // orientation feedback method 2 (somehow control go wrong in some cases)
             // F. Caccavale et al., "Six-DOF Impedance Control of Dual-Arm Cooperative Manipulators," in IEEE/ASME Transactions on Mechatronics, vol.13, no.5, pp.576-586, Oct. 2008.
             // Eigen::Quaternion<double> ee_ori_error_quat = ref_ee_quat.conjugate() * act_ee_quat;

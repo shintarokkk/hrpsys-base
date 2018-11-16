@@ -475,9 +475,11 @@ RTC::ReturnCode_t LimbTorqueController::onActivated(RTC::UniqueId ec_id)
 
 RTC::ReturnCode_t LimbTorqueController::onDeactivated(RTC::UniqueId ec_id)
 {
+  Guard guard(m_mutex);
   std::cerr << "[" << m_profile.instance_name<< "] onDeactivated(" << ec_id << ")" << std::endl;
 
-  //必要ならパラメータ等リセットd  return RTC::RTC_OK;
+  //必要ならパラメータ等リセット
+  return RTC::RTC_OK;
 }
 
 #define DEBUGP ((m_debugLevel==1 && loop%200==0) || m_debugLevel > 1 )
@@ -514,6 +516,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        m_rpyIn.read();
    }
 
+   Guard guard(m_mutex);
    if ( m_qRef.data.length() ==  m_robot->numJoints() &&
         m_qCurrent.data.length() ==  m_robot->numJoints() &&
         m_dqCurrent.data.length() == m_robot->numJoints() &&
@@ -1428,6 +1431,7 @@ void LimbTorqueController::CollisionDetector2(std::map<std::string, LTParam>::it
 //i_logname_: what log to take; "collision" or "operational"
 bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
 {
+    Guard guard(m_mutex);
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
@@ -1484,6 +1488,9 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
 
 bool LimbTorqueController::stopLog()
 {
+    Guard guard(m_mutex);
+    spit_log = false;
+    log_type = 0;
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
@@ -1519,9 +1526,7 @@ bool LimbTorqueController::stopLog()
         }
         it++;
     }
-    log_type = 0;
     std::cout << "[ltc] successfully stop log!!" << std::endl;
-    spit_log = false;
     return true;
 }
 

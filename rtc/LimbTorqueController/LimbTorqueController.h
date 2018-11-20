@@ -170,6 +170,7 @@ private:
     void CollisionDetector3(std::map<std::string, LTParam>::iterator it);
     void calcEECompensation();
     void calcNullJointDumping();
+    void estimateRefVel();
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
@@ -177,7 +178,7 @@ private:
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
     std::map<std::string, hrp::dvector> resist_direction;
-    std::map<std::string, hrp::dmatrix> act_ee_jacobian, ref_ee_jacobian, inv_ee_jacobian_t;
+    std::map<std::string, hrp::dmatrix> act_ee_jacobian, ref_ee_jacobian, inv_ee_jacobian, inv_ee_jacobian_t;
     //for ee compensation
     std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment, ee_vel_comp_force, ee_w_comp_moment;
     std::map<std::string, hrp::dvector> ee_pos_ori_comp_wrench, ee_vel_w_comp_wrench;
@@ -231,12 +232,15 @@ private:
     hrp::dvector actual_torque_vector;
     //for debug log
     std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
-    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_reftqb, debug_reftqa, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew, debug_dq; //for opetaional space control debug
+    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew, debug_dq; //for opetaional space control debug
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
-    std::map<std::string, hrp::dvector> reftq_bfr_mmavoidance, reftq_aftr_mmavoidance;
+    std::map<std::string, std::ofstream*> debug_velest, debug_velact;
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational
+
+    //reference velocity estimation
+    hrp::dvector estimated_reference_velocity;
 };
 
 extern "C"

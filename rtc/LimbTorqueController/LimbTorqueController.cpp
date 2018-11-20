@@ -377,6 +377,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         imp_prev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         imp_prevprev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         velest_initialized[ee_name] = false;
+        overwrite_refangle[ee_name] = false;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -450,6 +451,9 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     temp_u.resize(dof);
     temp_invdyn_result.resize(dof);
     estimated_reference_velocity.resize(dof);
+    log_est_q.resize(dof);
+    log_act_q.resize(dof);
+    log_ref_q.resize(dof);
     for (int i=0; i<dof; ++i){
         coil::stringTo(m_robot->joint(i)->climit, ltc_climit_str[i].c_str()); //limiting current value to one in conf file
         qoldRef[i] = 0.0;
@@ -604,6 +608,8 @@ void LimbTorqueController::getTargetParameters()
 {
     for ( size_t i = 0; i < m_robotRef->numJoints(); ++i){
         m_robotRef->joint(i)->q = m_qRef.data[i];
+        log_ref_q(i) = m_qRef.data[i];
+        log_est_q(i) = m_qRef.data[i];
         m_robotRef->joint(i)->dq = loop>1 ? ( m_qRef.data[i] - qoldRef[i] ) / m_dt : 0;
         estimated_reference_velocity(i) = m_robotRef->joint(i)->dq;
         m_robotRef->joint(i)->ddq = (m_robotRef->joint(i)->dq - dqoldRef[i]) / m_dt;
@@ -642,6 +648,7 @@ void LimbTorqueController::getActualParameters()
     //Current robot state
     for ( unsigned int i = 0; i<m_robot->numJoints(); ++i ){
         m_robot->joint(i)->q = m_qCurrent.data[i];
+        log_act_q(i) = m_qCurrent.data[i];
         //m_robot->joint(i)->dq = loop>1 ? ( m_qCurrent.data[i] - qold[i] ) / m_dt : 0;
         m_robot->joint(i)->dq = m_dqCurrent.data[i];
         m_robot->joint(i)->ddq = m_robotRef->joint(i)->ddq; //TODO
@@ -1341,6 +1348,9 @@ void LimbTorqueController::DebugOutput()
                     *(debug_dq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_velest[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                     *(debug_velact[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_qest[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_qact[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_qref[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1395,6 +1405,9 @@ void LimbTorqueController::DebugOutput()
                         *(debug_dq[ee_name]) << " " << dq_for_each_arm[ee_name](i);
                         *(debug_velest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
                         *(debug_velact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
+                        *(debug_qest[ee_name]) << " " << log_est_q(manip->joint(i)->jointId);
+                        *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
+                        *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
                     }
                     *(debug_ee_pocw[ee_name]) << std::endl;
                     *(debug_ee_vwcw[ee_name]) << std::endl;
@@ -1412,6 +1425,9 @@ void LimbTorqueController::DebugOutput()
                     *(debug_dq[ee_name]) << std::endl;
                     *(debug_velest[ee_name]) << std::endl;
                     *(debug_velact[ee_name]) << std::endl;
+                    *(debug_qest[ee_name]) << std::endl;
+                    *(debug_qact[ee_name]) << std::endl;
+                    *(debug_qref[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1494,6 +1510,9 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_dq[ee_name] = new std::ofstream((logpath  + std::string("dq.dat")).c_str());
                 debug_velest[ee_name] = new std::ofstream((logpath  + std::string("velest.dat")).c_str());
                 debug_velact[ee_name] = new std::ofstream((logpath  + std::string("velact.dat")).c_str());
+                debug_qest[ee_name] = new std::ofstream((logpath  + std::string("qest.dat")).c_str());
+                debug_qact[ee_name] = new std::ofstream((logpath  + std::string("qact.dat")).c_str());
+                debug_qref[ee_name] = new std::ofstream((logpath  + std::string("qref.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -1545,6 +1564,9 @@ bool LimbTorqueController::stopLog()
                 delete debug_dq[ee_name];
                 delete debug_velest[ee_name];
                 delete debug_velact[ee_name];
+                delete debug_qest[ee_name];
+                delete debug_qact[ee_name];
+                delete debug_qref[ee_name];
             }
         }
         it++;
@@ -1837,7 +1859,6 @@ void LimbTorqueController::estimateRefVel()
             ee_vel_r = ( param.ee_dgain_r(0,0) * ee_w_error[ee_name]
                          + param.ee_pgain_r(0,0) * ee_ori_error[ee_name] * RTC_PERIOD)
                 / ( param.ee_dgain_r(0,0) + param.ee_pgain_r(0,0) * RTC_PERIOD );
-            std::cout << "EE_vel_p = " << ee_vel_p.transpose() << std::endl;
             ee_ref_vel << ee_vel_p, ee_vel_r;
             imp_now[ee_name] = - inv_ee_jacobian[ee_name] * ee_ref_vel; // is sign correct?
             if(!velest_initialized[ee_name]){
@@ -1864,11 +1885,43 @@ void LimbTorqueController::estimateRefVel()
                 velest_prevprev[ee_name](i) = velest_prev[ee_name](i);
                 velest_prev[ee_name](i) = velest_now[ee_name](i);
             }
+            if(overwrite_refangle[ee_name]){
+                for(int i=0; i<limbdof; i++){
+                    int jid = manip->joint(i)->jointId;
+                    m_robotRef->joint(jid)->q = m_robotRef->joint(jid)->q + estimated_reference_velocity(jid) * RTC_PERIOD;
+                    log_est_q(jid) += m_robotRef->joint(jid)->q;
+                }
+            }
             for(int i=0; i<limbdof; i++){
                 int jid = manip->joint(i)->jointId;
             }
-            std::cout << "]" << std::endl;
         }
         it++;
     }
+}
+
+bool LimbTorqueController::startRefVelEstimation(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
+        return false;
+    }
+    overwrite_refangle[name] = true;
+    std::cout << "[" << m_profile.instance_name << "] start overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
+    return true;
+}
+
+bool LimbTorqueController::stopRefVelEstimation(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
+        return false;
+    }
+    overwrite_refangle[name] = false;
+    std::cout << "[" << m_profile.instance_name << "] stop overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
+    return true;
 }

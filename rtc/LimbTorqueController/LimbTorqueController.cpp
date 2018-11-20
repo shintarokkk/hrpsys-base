@@ -369,6 +369,14 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         RMSfilter<hrp::Matrix33> temp_w_filter(5, RTC_PERIOD);
         ee_w_filter[ee_name] = temp_w_filter;
         oscontrol_initialized[ee_name] = false;
+        //for velocity estimation
+        velest_now[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        velest_prev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        velest_prevprev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        imp_now[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        imp_prev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        imp_prevprev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
+        velest_initialized[ee_name] = false;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -451,6 +459,15 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     loop = 0;
 
     spit_log = false;
+
+    //set IIR filter constants (for velocity estimation)
+    iir_cutoff_frequency = 100.0; //Hz
+    iir_alpha = std::cos(M_PI*10.0*RTC_PERIOD/2.0) / std::sin(M_PI*10.0*RTC_PERIOD/2.0);
+    iir_a0 = 1.0 / ( 1.0 + std::sqrt(2.0)*iir_alpha + iir_alpha*iir_alpha );
+    iir_a1 = 2.0 * iir_a0;
+    iir_a2 = iir_a0;
+    iir_b1 = ( 2.0 - 2.0*iir_alpha*iir_alpha ) * iir_a0;
+    iir_b2 = ( 1.0 - std::sqrt(2.0)*iir_alpha + iir_alpha*iir_alpha ) * iir_a0;
 
 #if 1  //for legged robot
     hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
@@ -1814,7 +1831,6 @@ void LimbTorqueController::estimateRefVel()
             Eigen::Matrix<double, 6, 1> ee_ref_vel;
             hrp::Vector3 ee_vel_p, ee_vel_r;
             // TODO: these calculations assume isotropic PD gains!
-            // TODO: filtering?
             ee_vel_p = ( param.ee_dgain_p(0,0) * ee_vel_error[ee_name]
                          + param.ee_pgain_p(0,0) * ee_pos_error[ee_name] * RTC_PERIOD)
                 / ( param.ee_dgain_p(0,0) + param.ee_pgain_p(0,0) * RTC_PERIOD );
@@ -1823,10 +1839,30 @@ void LimbTorqueController::estimateRefVel()
                 / ( param.ee_dgain_r(0,0) + param.ee_pgain_r(0,0) * RTC_PERIOD );
             std::cout << "EE_vel_p = " << ee_vel_p.transpose() << std::endl;
             ee_ref_vel << ee_vel_p, ee_vel_r;
-            impedance_vel = - inv_ee_jacobian[ee_name] * ee_ref_vel; // is sign correct?
+            imp_now[ee_name] = - inv_ee_jacobian[ee_name] * ee_ref_vel; // is sign correct?
+            if(!velest_initialized[ee_name]){
+                for(int i=0; i<limbdof; i++){
+                    int jid = manip->joint(i)->jointId;
+                    velest_prev[ee_name](i) = m_robotRef->joint(jid)->dq;
+                    velest_prevprev[ee_name](i) = m_robotRef->joint(jid)->dq;
+                    imp_prev[ee_name](i) = imp_now[ee_name](i);
+                    imp_prevprev[ee_name](i) = imp_now[ee_name](i);
+                    velest_initialized[ee_name] = true;
+                }
+            }
             for(int i=0; i<limbdof; i++){
                 int jid = manip->joint(i)->jointId;
-                estimated_reference_velocity(jid) += impedance_vel(i);
+                velest_now[ee_name](i) =
+                    - iir_b1 * velest_prev[ee_name](i)
+                    - iir_b2 * velest_prev[ee_name](i)
+                    + iir_a0 * imp_now[ee_name](i)
+                    + iir_a1 * imp_prev[ee_name](i)
+                    + iir_a2 * imp_prevprev[ee_name](i);
+                estimated_reference_velocity(jid) += velest_now[ee_name](i);
+                imp_prevprev[ee_name](i) = imp_prev[ee_name](i);
+                imp_prev[ee_name](i) = imp_now[ee_name](i);
+                velest_prevprev[ee_name](i) = velest_prev[ee_name](i);
+                velest_prev[ee_name](i) = velest_now[ee_name](i);
             }
             for(int i=0; i<limbdof; i++){
                 int jid = manip->joint(i)->jointId;

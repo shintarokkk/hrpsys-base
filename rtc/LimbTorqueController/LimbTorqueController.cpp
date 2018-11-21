@@ -469,8 +469,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     spit_log = false;
 
     //set IIR filter constants (for velocity estimation)
-    iir_cutoff_frequency = 100.0; //Hz
-    iir_alpha = std::cos(M_PI*10.0*RTC_PERIOD/2.0) / std::sin(M_PI*10.0*RTC_PERIOD/2.0);
+    iir_cutoff_frequency = 10.0; //Hz
+    iir_alpha = std::cos(M_PI*iir_cutoff_frequency*RTC_PERIOD/2.0) / std::sin(M_PI**iir_cutoff_frequency*RTC_PERIOD/2.0);
     iir_a0 = 1.0 / ( 1.0 + std::sqrt(2.0)*iir_alpha + iir_alpha*iir_alpha );
     iir_a1 = 2.0 * iir_a0;
     iir_a2 = iir_a0;
@@ -1322,38 +1322,39 @@ void LimbTorqueController::DebugOutput()
                 int limbdof = manip->numJoints();
                 struct timeval nowtime;
                 gettimeofday(&nowtime, NULL);
+                long int micro_time = nowtime.tv_sec*1e+6 + nowtime.tv_usec;
                 if(log_type == 1){
-                    *(debug_mom[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_actau[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_acbet[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_acres[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_res[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_reftq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_f[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_mom[ee_name]) << micro_time;
+                    *(debug_actau[ee_name]) << micro_time;
+                    *(debug_acbet[ee_name]) << micro_time;
+                    *(debug_acres[ee_name]) << micro_time;
+                    *(debug_res[ee_name]) << micro_time;
+                    *(debug_reftq[ee_name]) << micro_time;
+                    *(debug_f[ee_name]) << micro_time;
                     if(col_param.check_mode == 3){
-                        *(debug_resdir[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                        *(debug_resdir[ee_name]) << micro_time;
                     }
                 }
                 else if(log_type == 2){
-                    *(debug_ee_pocw[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_ee_vwcw[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_eect[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_nst[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_ee_poserror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_ee_orierror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_ee_velerror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_ee_werror[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_reftq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_acteevel[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_refeevel[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_acteew[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_refeew[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_dq[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_velest[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_velact[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_qest[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_qact[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
-                    *(debug_qref[ee_name]) << nowtime.tv_sec << "." << nowtime.tv_usec;
+                    *(debug_ee_pocw[ee_name]) << micro_time;
+                    *(debug_ee_vwcw[ee_name]) << micro_time;
+                    *(debug_eect[ee_name]) << micro_time;
+                    *(debug_nst[ee_name]) << micro_time;
+                    *(debug_ee_poserror[ee_name]) << micro_time;
+                    *(debug_ee_orierror[ee_name]) << micro_time;
+                    *(debug_ee_velerror[ee_name]) << micro_time;
+                    *(debug_ee_werror[ee_name]) << micro_time;
+                    *(debug_reftq[ee_name]) << micro_time;
+                    *(debug_acteevel[ee_name]) << micro_time;
+                    *(debug_refeevel[ee_name]) << micro_time;
+                    *(debug_acteew[ee_name]) << micro_time;
+                    *(debug_refeew[ee_name]) << micro_time;
+                    *(debug_dq[ee_name]) << micro_time;
+                    *(debug_velest[ee_name]) << micro_time;
+                    *(debug_velact[ee_name]) << micro_time;
+                    *(debug_qest[ee_name]) << micro_time;
+                    *(debug_qact[ee_name]) << micro_time;
+                    *(debug_qref[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1878,7 +1879,7 @@ void LimbTorqueController::estimateRefVel()
                 int jid = manip->joint(i)->jointId;
                 velest_now[ee_name](i) =
                     - iir_b1 * velest_prev[ee_name](i)
-                    - iir_b2 * velest_prev[ee_name](i)
+                    - iir_b2 * velest_prevprev[ee_name](i)
                     + iir_a0 * imp_now[ee_name](i)
                     + iir_a1 * imp_prev[ee_name](i)
                     + iir_a2 * imp_prevprev[ee_name](i);

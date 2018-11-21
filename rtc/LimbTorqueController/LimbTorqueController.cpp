@@ -378,6 +378,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         imp_prevprev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         velest_initialized[ee_name] = false;
         overwrite_refangle[ee_name] = false;
+        stop_overwriting_q_transition_count[ee_name] = 0;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -450,10 +451,13 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     temp_ref_u.resize(dof);
     temp_u.resize(dof);
     temp_invdyn_result.resize(dof);
+    overwritten_qRef_prev.resize(dof); // use this because ref_vel in iob is calculated as (ref_q - prev_ref_q) / dt
     estimated_reference_velocity.resize(dof);
+    transition_velest.resize(dof);
     log_est_q.resize(dof);
     log_act_q.resize(dof);
     log_ref_q.resize(dof);
+    max_stop_overwriting_q_transition_count = 1000;
     for (int i=0; i<dof; ++i){
         coil::stringTo(m_robot->joint(i)->climit, ltc_climit_str[i].c_str()); //limiting current value to one in conf file
         qoldRef[i] = 0.0;
@@ -609,7 +613,6 @@ void LimbTorqueController::getTargetParameters()
     for ( size_t i = 0; i < m_robotRef->numJoints(); ++i){
         m_robotRef->joint(i)->q = m_qRef.data[i];
         log_ref_q(i) = m_qRef.data[i];
-        log_est_q(i) = m_qRef.data[i];
         m_robotRef->joint(i)->dq = loop>1 ? ( m_qRef.data[i] - qoldRef[i] ) / m_dt : 0;
         estimated_reference_velocity(i) = m_robotRef->joint(i)->dq;
         m_robotRef->joint(i)->ddq = (m_robotRef->joint(i)->dq - dqoldRef[i]) / m_dt;
@@ -1879,27 +1882,44 @@ void LimbTorqueController::estimateRefVel()
                     + iir_a0 * imp_now[ee_name](i)
                     + iir_a1 * imp_prev[ee_name](i)
                     + iir_a2 * imp_prevprev[ee_name](i);
-                estimated_reference_velocity(jid) += velest_now[ee_name](i);
+                estimated_reference_velocity(jid) += velest_now[ee_name](i); // estimated_vel = (ref_vel calculated from difference of reference angle vector) + (ref_vel estimated from impedance force)
                 imp_prevprev[ee_name](i) = imp_prev[ee_name](i);
                 imp_prev[ee_name](i) = imp_now[ee_name](i);
                 velest_prevprev[ee_name](i) = velest_prev[ee_name](i);
                 velest_prev[ee_name](i) = velest_now[ee_name](i);
             }
+            //TODO: what if start and stop switches frequently?
+            //TODO: what if start or stop overwriting during moving joints?
             if(overwrite_refangle[ee_name]){
-                for(int i=0; i<limbdof; i++){
-                    int jid = manip->joint(i)->jointId;
-                    m_robotRef->joint(jid)->q = m_robotRef->joint(jid)->q + estimated_reference_velocity(jid) * RTC_PERIOD;
-                    log_est_q(jid) += m_robotRef->joint(jid)->q;
+                if(stop_overwriting_q_transition_count[ee_name] == 0){
+                    for(int i=0; i<limbdof; i++){
+                        int jid = manip->joint(i)->jointId;
+                        m_robotRef->joint(jid)->q = overwritten_qRef_prev(jid) + estimated_reference_velocity(jid) * RTC_PERIOD; // in iob, ref_vel is calculated as ('reference joint angle' - 'previous reference joint angle') / dt
+                    }
+                }else{ // transition to stop overwriting
+                    for(int i=0; i<limbdof; i++){
+                        int jid = manip->joint(i)->jointId;
+                        transition_velest(jid) = (m_robotRef->joint(jid)->q - overwritten_qRef_prev(jid)) / (stop_overwriting_q_transition_count[ee_name] * RTC_PERIOD); // in one step
+                        m_robotRef->joint(jid)->q = overwritten_qRef_prev(jid) + transition_velest(jid) * RTC_PERIOD;
+                    }
+                    stop_overwriting_q_transition_count[ee_name]--;
+                    if(stop_overwriting_q_transition_count[ee_name] == 0){
+                        overwrite_refangle[ee_name] = false;
+                    }
                 }
-            }
-            for(int i=0; i<limbdof; i++){
-                int jid = manip->joint(i)->jointId;
             }
         }
         it++;
     }
+    // set previous overwritten joint angles
+    for(int i=0; i<m_robotRef->numJoints(); i++){
+        overwritten_qRef_prev(i) = m_robotRef->joint(i)->q;
+        log_est_q(i) = m_robotRef->joint(i)->q;
+    }
 }
 
+// start overwriting qRef with qRef+estimated_ref_vel * dt
+// do not call during position control
 bool LimbTorqueController::startRefVelEstimation(const std::string& i_name_)
 {
     Guard guard(m_mutex);
@@ -1913,6 +1933,7 @@ bool LimbTorqueController::startRefVelEstimation(const std::string& i_name_)
     return true;
 }
 
+// stop overwriting qRef, using transition. do not use normally?
 bool LimbTorqueController::stopRefVelEstimation(const std::string& i_name_)
 {
     Guard guard(m_mutex);
@@ -1921,7 +1942,7 @@ bool LimbTorqueController::stopRefVelEstimation(const std::string& i_name_)
         std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
         return false;
     }
-    overwrite_refangle[name] = false;
+    stop_overwriting_q_transition_count[name] = max_stop_overwriting_q_transition_count;
     std::cout << "[" << m_profile.instance_name << "] stop overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
     return true;
 }

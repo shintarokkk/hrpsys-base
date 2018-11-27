@@ -29,6 +29,9 @@
 // <rtc-template block="service_impl_h">
 #include "LimbTorqueControllerService_impl.h"
 
+typedef Eigen::Matrix<double, 2, 2> Matrix22;
+typedef Eigen::Matrix<double, 2, 1> Vector2;
+
 // minimum-root-mean-square-error filter for first order differenciation of Vector3
 // .      3x_k - 4x_(k-N) + x_(k-2N)
 // x_k = -----------------------------
@@ -238,6 +241,8 @@ private:
     std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew, debug_dq; //for opetaional space control debug
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
     std::map<std::string, std::ofstream*> debug_velest, debug_velact, debug_qest, debug_qact, debug_qref;
+    // ee vel&force estimation
+    std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench;
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational
@@ -250,6 +255,16 @@ private:
     std::map<std::string, bool> velest_initialized, overwrite_refangle;
     std::map<std::string, int> stop_overwriting_q_transition_count;
     int max_stop_overwriting_q_transition_count;
+
+    // end-effector screw and wrench estimation
+    std::map<std::string, bool> eeest_initialized;
+    std::map<std::string, std::vector<Vector2> > trans_est, rot_est;
+    std::map<std::string, std::vector<Matrix22> > trans_covariance, rot_covariance;
+    std::map<std::string, hrp::Matrix33> impedance_mass_mat, impedance_inertia_mat;
+    std::map<std::string, Matrix22>  translational_system_noise_matrix, rotational_system_noise_matrix, translational_observation_noise_matrix, rotational_observation_noise_matrix;
+    std::map<std::string, hrp::dvector> filtered_screw, filtered_wrench;
+    void estimateEEVelForce();
+    void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 };
 
 extern "C"

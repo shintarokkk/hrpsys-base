@@ -161,6 +161,7 @@ private:
     void copyLimbTorqueControllerParam (OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param);
     void copyCollisionParam(LimbTorqueControllerService::collisionParam& i_param_, const CollisionParam& param);
     void getTargetParameters();
+    void calcForceMoment();
     void getActualParameters();
     void calcLimbInverseDynamics();
     void calcGravityCompensation();

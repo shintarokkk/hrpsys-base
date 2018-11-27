@@ -470,7 +470,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
 
     //set IIR filter constants (for velocity estimation)
     iir_cutoff_frequency = 10.0; //Hz
-    iir_alpha = std::cos(M_PI*iir_cutoff_frequency*RTC_PERIOD/2.0) / std::sin(M_PI**iir_cutoff_frequency*RTC_PERIOD/2.0);
+    iir_alpha = std::cos(M_PI*iir_cutoff_frequency*RTC_PERIOD/2.0) / std::sin(M_PI*iir_cutoff_frequency*RTC_PERIOD/2.0);
     iir_a0 = 1.0 / ( 1.0 + std::sqrt(2.0)*iir_alpha + iir_alpha*iir_alpha );
     iir_a1 = 2.0 * iir_a0;
     iir_a2 = iir_a0;
@@ -516,6 +516,15 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
    loop ++;
 
    //Read Import
+    for (unsigned int i=0; i<m_forceIn.size(); i++){
+      if ( m_forceIn[i]->isNew() ) {
+          m_forceIn[i]->read();
+      }
+        // TODO: add ref force
+        // if ( m_ref_forceIn[i]->isNew() ) {
+        //     m_ref_forceIn[i]->read();
+        // }
+   }
    if (m_qCurrentIn.isNew()) {
        m_qCurrentIn.read();
    }
@@ -547,6 +556,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
         m_dqCurrent.data.length() == m_robot->numJoints() &&
         m_tqCurrent.data.length() == m_robot->numJoints()) {
        getTargetParameters(); //上位から来るref値を変数にセット
+       calcForceMoment();
        getActualParameters(); //センサ値を変数にセット
 
        if (torque_output_type == CALC_TORQUE) {
@@ -556,7 +566,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            calcEECompensation();
            calcNullJointDumping();
            //calcMinMaxAvoidanceTorque(); //Null Spaceで考慮しているので使わない
-           estimateRefVel();
+           //estimateRefVel(); // to be tested more
 
        }
        else if (torque_output_type == REF_TORQUE) {
@@ -644,6 +654,62 @@ void LimbTorqueController::getTargetParameters()
         }
         it++;
     }
+}
+
+// copied from ImpedanceController
+void LimbTorqueController::calcForceMoment ()
+{
+      for (unsigned int i=0; i<m_forceIn.size(); i++){
+        if ( m_force[i].data.length()==6 ) {
+          std::string sensor_name = m_forceIn[i]->name();
+          hrp::ForceSensor* sensor = m_robot->sensor<hrp::ForceSensor>(sensor_name);
+          hrp::Vector3 data_p(m_force[i].data[0], m_force[i].data[1], m_force[i].data[2]);
+          hrp::Vector3 data_r(m_force[i].data[3], m_force[i].data[4], m_force[i].data[5]);
+          // hrp::Vector3 ref_data_p(m_ref_force[i].data[0], m_ref_force[i].data[1], m_ref_force[i].data[2]);
+          // hrp::Vector3 ref_data_r(m_ref_force[i].data[3], m_ref_force[i].data[4], m_ref_force[i].data[5]);
+          if ( DEBUGP ) {
+            std::cerr << "[" << m_profile.instance_name << "] force and moment [" << sensor_name << "]" << std::endl;
+            std::cerr << "[" << m_profile.instance_name << "]   sensor force  = " << data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+            std::cerr << "[" << m_profile.instance_name << "]   sensor moment = " << data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+            // std::cerr << "[" << m_profile.instance_name << "]   reference force  = " << ref_data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+            // std::cerr << "[" << m_profile.instance_name << "]   reference moment = " << ref_data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+          }
+          hrp::Matrix33 sensorR;
+          hrp::Vector3 sensorPos, eePos;
+          if ( sensor ) {
+            // real force sensore
+            sensorR = sensor->link->R * sensor->localR;
+            sensorPos = sensor->link->p + sensorR * sensor->localPos;
+          } else if ( m_vfs.find(sensor_name) !=  m_vfs.end()) {
+            // virtual force sensor
+            if ( DEBUGP ) {
+              std::cerr << "[" << m_profile.instance_name << "]   sensorR = " << m_vfs[sensor_name].localR.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+            }
+            sensorR = m_vfs[sensor_name].link->R * m_vfs[sensor_name].localR;
+            sensorPos = m_vfs[sensor_name].link->p + m_vfs[sensor_name].link->R * m_vfs[sensor_name].localPos;
+          } else {
+            std::cerr << "[" << m_profile.instance_name << "]   unknown force param" << std::endl;
+          }
+          abs_forces[sensor_name] = sensorR * data_p;
+          for ( std::map<std::string, LTParam>::iterator it = m_lt_param.begin(); it != m_lt_param.end(); it++ ) {
+              if ( it->second.sensor_name == sensor_name ) eePos = ee_map[sensor_name].localPos;
+          }
+          abs_moments[sensor_name] = sensorR * data_r + (sensorPos - eePos).cross(abs_forces[sensor_name]);
+          // End effector local frame
+          // hrp::Matrix33 eeR (parentlink->R * ee_map[parentlink->name].localR);
+          // abs_ref_forces[sensor_name] = eeR * ref_data_p;
+          // abs_ref_moments[sensor_name] = eeR * ref_data_r;
+          // World frame
+          // abs_ref_forces[sensor_name] = ref_data_p;
+          // abs_ref_moments[sensor_name] = ref_data_r;
+          if ( DEBUGP ) {
+            std::cerr << "[" << m_profile.instance_name << "]   abs force  = " << abs_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+            std::cerr << "[" << m_profile.instance_name << "]   abs moment = " << abs_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+            // std::cerr << "[" << m_profile.instance_name << "]   abs ref force  = " << abs_ref_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+            // std::cerr << "[" << m_profile.instance_name << "]   abs ref moment = " << abs_ref_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+          }
+        }
+      }
 }
 
 void LimbTorqueController::getActualParameters()

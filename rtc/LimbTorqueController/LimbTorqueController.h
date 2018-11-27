@@ -265,6 +265,12 @@ private:
     std::map<std::string, hrp::dvector> filtered_screw, filtered_wrench;
     void estimateEEVelForce();
     void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
+
+    //disturbance observer
+    std::map<std::string, hrp::Vector3> velocity_discrepancy, force_increase, prev_filtered_force;
+    std::map<std::string, bool> dist_obs_initialized;
+    std::map<std::string, std::ofstream*> debug_vel_discrepancy, debug_force_inc;
+    void DisturbanceObserver();
 };
 
 extern "C"

@@ -380,6 +380,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         overwrite_refangle[ee_name] = false;
         stop_overwriting_q_transition_count[ee_name] = 0;
         eeest_initialized[ee_name] = false;
+        dist_obs_initialized[ee_name] = false;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -569,6 +570,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
            //calcMinMaxAvoidanceTorque(); //Null Spaceで考慮しているので使わない
            //estimateRefVel(); // to be tested more
            estimateEEVelForce();
+           DisturbanceObserver();
        }
        else if (torque_output_type == REF_TORQUE) {
            addDumpingToRefTorque();
@@ -1426,6 +1428,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteescrew[ee_name]) << micro_time;
                     *(debug_acteewrench[ee_name]) << micro_time;
                     *(debug_esteewrench[ee_name]) << micro_time;
+                    *(debug_vel_discrepancy[ee_name]) << micro_time;
+                    *(debug_force_inc[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1478,6 +1482,8 @@ void LimbTorqueController::DebugOutput()
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
                         *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
+                        *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
+                        *(debug_force_inc[ee_name]) << " " << force_increase[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
@@ -1517,6 +1523,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteescrew[ee_name]) << std::endl;
                     *(debug_acteewrench[ee_name]) << std::endl;
                     *(debug_esteewrench[ee_name]) << std::endl;
+                    *(debug_vel_discrepancy[ee_name]) << std::endl;
+                    *(debug_force_inc[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1606,6 +1614,8 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_esteescrew[ee_name] = new std::ofstream((logpath  + std::string("est_ee_screw.dat")).c_str());
                 debug_acteewrench[ee_name] = new std::ofstream((logpath  + std::string("act_ee_wrench.dat")).c_str());
                 debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
+                debug_vel_discrepancy[ee_name] = new std::ofstream((logpath  + std::string("vel_discrepancy.dat")).c_str());
+                debug_force_inc[ee_name] = new std::ofstream((logpath  + std::string("force_increase.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -1664,6 +1674,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_esteescrew[ee_name];
                 delete debug_acteewrench[ee_name];
                 delete debug_esteewrench[ee_name];
+                delete debug_vel_discrepancy[ee_name];
+                delete debug_force_inc[ee_name];
             }
         }
         it++;
@@ -2056,60 +2068,58 @@ void LimbTorqueController::estimateEEVelForce()
                 estimateEEVelForce_init(it);
                 eeest_initialized[ee_name] = true;
             }
-            else{
-                const Matrix22 Iden22 = Matrix22::Identity();
-                // translational part
-                for (int i=0; i<3; i++){
-                    // prediction step
-                    Vector2 prior_state_est;
-                    Matrix22 state_update_matrix, prior_error_covariance;
-                    double sum12, sum21, sum22; // components of state update matrix
-                    sum12 = RTC_PERIOD / impedance_mass_mat[ee_name](i,i);
-                    sum21 = - RTC_PERIOD * param.ee_pgain_p(i,i);
-                    sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_p(i,i)/impedance_mass_mat[ee_name](i,i);
-                    state_update_matrix <<
-                        1.0, sum12,
-                        sum21, sum22;
-                    prior_state_est = state_update_matrix * trans_est[ee_name][i];
-                    prior_error_covariance = state_update_matrix * trans_covariance[ee_name][i] * state_update_matrix.transpose() + translational_system_noise_matrix[ee_name];
-                    // filtering step
-                    Matrix22 kalman_gain;
-                    Vector2 observation;
-                    observation << act_ee_vel[ee_name](i), abs_forces[param.sensor_name](i);
-                    kalman_gain = prior_error_covariance * (prior_error_covariance + translational_observation_noise_matrix[ee_name]).inverse();
-                    trans_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
-                    trans_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
-                }
-                // rotational part
-                for (int i=0; i<3; i++){
-                    // prediction step
-                    Vector2 prior_state_est;
-                    Matrix22 state_update_matrix, prior_error_covariance;
-                    double sum12, sum21, sum22; // components of state update matrix
-                    sum12 = RTC_PERIOD / impedance_inertia_mat[ee_name](i,i);
-                    sum21 = - RTC_PERIOD * param.ee_pgain_r(i,i);
-                    sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_r(i,i)/impedance_inertia_mat[ee_name](i,i);
-                    state_update_matrix <<
-                        1.0, sum12,
-                        sum21, sum22;
-                    prior_state_est = state_update_matrix * rot_est[ee_name][i];
-                    prior_error_covariance = state_update_matrix * rot_covariance[ee_name][i] * state_update_matrix.transpose() + rotational_system_noise_matrix[ee_name];
-                    // filtering step
-                    Matrix22 kalman_gain;
-                    Vector2 observation;
-                    observation << act_ee_w[ee_name](i), abs_moments[param.sensor_name](i);
-                    kalman_gain = prior_error_covariance * (prior_error_covariance + rotational_observation_noise_matrix[ee_name]).inverse();
-                    rot_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
-                    rot_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
-                }
-                // reorganize variants into screw and wrench
-                for(int i=0; i<3; i++){
-                    // TODO: exclude original reference velocity?
-                    filtered_screw[ee_name](i) = trans_est[ee_name][i](0);
-                    filtered_screw[ee_name](i+3) = rot_est[ee_name][i](0);
-                    filtered_wrench[ee_name](i) = trans_est[ee_name][i](1);
-                    filtered_wrench[ee_name](i+3) = rot_est[ee_name][i](1);
-                }
+            const Matrix22 Iden22 = Matrix22::Identity();
+            // translational part
+            for (int i=0; i<3; i++){
+                // prediction step
+                Vector2 prior_state_est;
+                Matrix22 state_update_matrix, prior_error_covariance;
+                double sum12, sum21, sum22; // components of state update matrix
+                sum12 = RTC_PERIOD / impedance_mass_mat[ee_name](i,i);
+                sum21 = - RTC_PERIOD * param.ee_pgain_p(i,i);
+                sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_p(i,i)/impedance_mass_mat[ee_name](i,i);
+                state_update_matrix <<
+                    1.0, sum12,
+                    sum21, sum22;
+                prior_state_est = state_update_matrix * trans_est[ee_name][i];
+                prior_error_covariance = state_update_matrix * trans_covariance[ee_name][i] * state_update_matrix.transpose() + translational_system_noise_matrix[ee_name];
+                // filtering step
+                Matrix22 kalman_gain;
+                Vector2 observation;
+                observation << act_ee_vel[ee_name](i), abs_forces[param.sensor_name](i);
+                kalman_gain = prior_error_covariance * (prior_error_covariance + translational_observation_noise_matrix[ee_name]).inverse();
+                trans_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
+                trans_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
+            }
+            // rotational part
+            for (int i=0; i<3; i++){
+                // prediction step
+                Vector2 prior_state_est;
+                Matrix22 state_update_matrix, prior_error_covariance;
+                double sum12, sum21, sum22; // components of state update matrix
+                sum12 = RTC_PERIOD / impedance_inertia_mat[ee_name](i,i);
+                sum21 = - RTC_PERIOD * param.ee_pgain_r(i,i);
+                sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_r(i,i)/impedance_inertia_mat[ee_name](i,i);
+                state_update_matrix <<
+                    1.0, sum12,
+                    sum21, sum22;
+                prior_state_est = state_update_matrix * rot_est[ee_name][i];
+                prior_error_covariance = state_update_matrix * rot_covariance[ee_name][i] * state_update_matrix.transpose() + rotational_system_noise_matrix[ee_name];
+                // filtering step
+                Matrix22 kalman_gain;
+                Vector2 observation;
+                observation << act_ee_w[ee_name](i), abs_moments[param.sensor_name](i);
+                kalman_gain = prior_error_covariance * (prior_error_covariance + rotational_observation_noise_matrix[ee_name]).inverse();
+                rot_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
+                rot_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
+            }
+            // reorganize variants into screw and wrench
+            for(int i=0; i<3; i++){
+                // TODO: exclude original reference velocity?
+                filtered_screw[ee_name](i) = trans_est[ee_name][i](0);
+                filtered_screw[ee_name](i+3) = rot_est[ee_name][i](0);
+                filtered_wrench[ee_name](i) = trans_est[ee_name][i](1);
+                filtered_wrench[ee_name](i+3) = rot_est[ee_name][i](1);
             }
         }
         it++;
@@ -2152,4 +2162,34 @@ void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, L
     // initialize log variants
     filtered_screw[ee_name].resize(6);
     filtered_wrench[ee_name].resize(6);
+}
+
+void LimbTorqueController::DisturbanceObserver()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active && eeest_initialized[ee_name]) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            if(!dist_obs_initialized[ee_name]){
+                for (int i=0; i<3; i++){
+                    prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
+                }
+                dist_obs_initialized[ee_name] = true;
+            }
+            // observe discrepancy of reference velocity and filtered velocity (only translational part)
+            for(int i=0; i<3; i++){
+                velocity_discrepancy[ee_name](i) = filtered_screw[ee_name](i) - ref_ee_vel[ee_name](i);
+            }
+            // observe time increase of filtered force (only translational part)
+            for(int i=0; i<3; i++){
+                force_increase[ee_name](i) = (filtered_wrench[ee_name](i) - ref_ee_vel[ee_name](i)) / RTC_PERIOD;
+                prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
+            }
+        }
+        it++;
+    }
 }

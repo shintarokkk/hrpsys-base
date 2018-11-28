@@ -36,6 +36,8 @@ public:
   CORBA::Boolean stopLog();
   CORBA::Boolean startRefdqEstimation(const char *i_name_);
   CORBA::Boolean stopRefdqEstimation(const char *i_name_);
+  CORBA::Boolean startDisturbanceObserver(const char *i_name_);
+  CORBA::Boolean stopDisturbanceObserver(const char *i_name_);
   CORBA::Boolean startLTCEmergency(const char *i_name_);
   CORBA::Boolean stopLTCEmergency(const char *i_name_);
 

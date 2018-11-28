@@ -371,6 +371,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         overwrite_refangle[ee_name] = false;
         stop_overwriting_q_transition_count[ee_name] = 0;
         eeest_initialized[ee_name] = false;
+        observe_disturbance[ee_name] = false;
         dist_obs_initialized[ee_name] = false;
         reftqregulator_initialized[ee_name] = false;
 
@@ -1409,23 +1410,31 @@ void LimbTorqueController::DisturbanceObserver()
                 disturbance_detected[ee_name] = false;
                 dist_obs_initialized[ee_name] = true;
             }
-            // observe discrepancy of reference velocity and filtered velocity (only translational part)
-            for(int i=0; i<3; i++){
-                velocity_discrepancy[ee_name](i) = filtered_screw[ee_name](i) - ref_ee_vel[ee_name](i);
-            }
-            // observe time increase of filtered force (only translational part)
-            for(int i=0; i<3; i++){
-                force_increase[ee_name](i) = (filtered_wrench[ee_name](i) - ref_ee_vel[ee_name](i)) / RTC_PERIOD;
-                prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
-            }
-            if(disturbance_detected[ee_name]){
-                if(disturbance_uncheck_count[ee_name] > 0){
-                    // ?
-                }else{
-                    //disturbance_detected[ee_name] = false; //temporary disabling for test
+            if(observe_disturbance[ee_name]){
+                // observe discrepancy of reference velocity and filtered velocity (only translational part)
+                for(int i=0; i<3; i++){
+                    velocity_discrepancy[ee_name](i) = filtered_screw[ee_name](i) - ref_ee_vel[ee_name](i);
                 }
-            }else{
-                // check disturbance
+                // observe time increase of filtered force (only translational part)
+                for(int i=0; i<3; i++){
+                    force_increase[ee_name](i) = (filtered_wrench[ee_name](i) - ref_ee_vel[ee_name](i)) / RTC_PERIOD;
+                    prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
+                }
+                if(disturbance_detected[ee_name]){
+                    if(disturbance_uncheck_count[ee_name] > 0){
+                        // ?
+                    }else{
+                        //disturbance_detected[ee_name] = false; //temporary disabling for test
+                    }
+                }else{
+                    // check disturbance
+                    for (int i=0; i<3; i++){
+                        if(velocity_discrepancy[ee_name](i) > 0.1){ //TO be tuned
+                            disturbance_detected[ee_name] = true;
+                            disturbance_uncheck_count[ee_name] = max_disturbance_uncheck_count;
+                        }
+                    }
+                }
             }
         }
         it++;
@@ -1845,6 +1854,32 @@ bool LimbTorqueController::stopRefdqEstimation(const std::string& i_name_)
     return true;
 }
 
+bool LimbTorqueController::startDisturbanceObserver(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
+        return false;
+    }
+    observe_disturbance[name] = true;
+    std::cout << "[ltc] start disturbance observer!!" << std::endl;
+    return true;
+}
+
+bool LimbTorqueController::stopDisturbanceObserver(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
+        return false;
+    }
+    observe_disturbance[name] = false;
+    std::cout << "[ltc] stop disturbance observer!!" << std::endl;
+    return true;
+}
+
 //i_name_: base file path of log
 //i_logname_: what log to take; "collision" or "operational"
 bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
@@ -1975,7 +2010,6 @@ bool LimbTorqueController::startLTCEmergency(const std::string& i_name_)
     }
     disturbance_detected[name] = true;
     disturbance_uncheck_count[name] = max_disturbance_uncheck_count;
-    std::cerr << "[" << m_profile.instance_name << "] Update limb toruqe parameters" << std::endl;
     std::cout << "[ltc] start emergency mode!!" << std::endl;
     return true;
 }

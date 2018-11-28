@@ -103,6 +103,8 @@ public:
     bool stopLog();
     bool startRefdqEstimation(const std::string& i_name_);
     bool stopRefdqEstimation(const std::string& i_name_);
+    bool startDisturbanceObserver(const std::string& i_name_);
+    bool stopDisturbanceObserver(const std::string& i_name_);
     // test for reference torque regulator
     bool startLTCEmergency(const std::string& i_name_);
     bool stopLTCEmergency(const std::string& i_name_);
@@ -256,7 +258,7 @@ private:
 
     // disturbance observer
     std::map<std::string, hrp::Vector3> velocity_discrepancy, force_increase, prev_filtered_force;
-    std::map<std::string, bool> dist_obs_initialized;
+    std::map<std::string, bool> observe_disturbance, dist_obs_initialized;
     std::map<std::string, std::ofstream*> debug_vel_discrepancy, debug_force_inc;
     std::map<std::string, bool> disturbance_detected;
     void DisturbanceObserver();
@@ -269,6 +271,7 @@ private:
     int max_disturbance_uncheck_count;
     std::map<std::string, hrp::Vector3> reaction_eepos, reaction_eevel, reaction_eew;
     std::map<std::string, hrp::dquaternion> reaction_eeori;
+
     void RefTorqueRegulator();
     void RecalcEECompensation(const std::map<std::string, LTParam>::iterator it, const hrp::Vector3 _ref_ee_pos, const hrp::dquaternion _ref_ee_ori, const hrp::Vector3 _ref_ee_vel, const hrp::Vector3 _ref_ee_w);
 };

@@ -149,6 +149,8 @@ module OpenHRP
      */
     boolean stopRefdqEstimation(in string name);
 
+    boolean startDisturbanceObserver(in string name);
+    boolean stopDisturbanceObserver(in string name);
     boolean startLTCEmergency(in string name);
     boolean stopLTCEmergency(in string name);
   };

@@ -833,212 +833,6 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
     }
 }
 
-bool LimbTorqueController::startLimbTorqueController(const std::string& i_name_)
-{
-    {
-        Guard guard(m_mutex);
-        if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
-            std::cerr << "[" << m_profile.instance_name << "] Could not find limbtorque controller param [" << i_name_ << "]" << std::endl;
-            return false;
-        }
-        if ( m_lt_param[i_name_].is_active ) {
-            std::cerr << "[" << m_profile.instance_name << "] Limbtorque control [" << i_name_ << "] is already started" << std::endl;
-            return false;
-        }
-        std::cerr << "[" << m_profile.instance_name << "] Start limbtorque control [" << i_name_ << "]" << std::endl;
-        m_lt_param[i_name_].is_active = true;
-        m_ref_lt_param[i_name_].is_active = true;
-    }
-    return true;
-}
-
-bool LimbTorqueController::stopLimbTorqueController(const std::string& i_name_)
-{
-    {
-        Guard guard(m_mutex);
-        if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
-            std::cerr << "[" << m_profile.instance_name << "] Could not find limbtorque controller param [" << i_name_ << "]" << std::endl;
-            return false;
-        }
-        if ( !m_lt_param[i_name_].is_active ) {
-            std::cerr << "[" << m_profile.instance_name << "] Limbtorque control [" << i_name_ << "] is already stopped" << std::endl;
-            return false;
-        }
-        std::cerr << "[" << m_profile.instance_name << "] Stop limbtorque control [" << i_name_ << "]" << std::endl;
-        //TODO: transition?
-        m_lt_param[i_name_].is_active = false;
-        m_ref_lt_param[i_name_].is_active = false;
-    }
-    return true;
-}
-
-bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam i_param_)
-{
-    {
-        Guard guard(m_mutex);
-        std::string name = std::string(i_name_);
-        if ( m_lt_param.find(name) == m_lt_param.end() ) {
-            std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
-            return false;
-        }
-
-        std::cerr << "[" << m_profile.instance_name << "] Update limb toruqe parameters" << std::endl;
-
-        m_lt_param[name].pgain = i_param_.Pgain;
-        m_lt_param[name].dgain = i_param_.Dgain;
-
-        hrp::dvector ee_pgain_vec(6), ee_dgain_vec(6);
-        ee_pgain_vec << i_param_.ee_pgain[0], i_param_.ee_pgain[1], i_param_.ee_pgain[2], i_param_.ee_pgain[3], i_param_.ee_pgain[4], i_param_.ee_pgain[5];
-        ee_dgain_vec << i_param_.ee_dgain[0], i_param_.ee_dgain[1], i_param_.ee_dgain[2], i_param_.ee_dgain[3], i_param_.ee_dgain[4], i_param_.ee_dgain[5];
-        m_lt_param[name].ee_pgain_p = ee_pgain_vec.head(3).asDiagonal();
-        m_lt_param[name].ee_pgain_r = ee_pgain_vec.tail(3).asDiagonal();
-        m_lt_param[name].ee_dgain_p = ee_dgain_vec.head(3).asDiagonal();
-        m_lt_param[name].ee_dgain_r = ee_dgain_vec.tail(3).asDiagonal();
-        hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
-        hrp::dmatrix concatenated_dgain = ee_dgain_vec.asDiagonal();  //just for print
-
-        std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]       ee_pgain : " << concatenated_pgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
-        std::cerr << "[" << m_profile.instance_name << "]      ee_dgain : " << concatenated_dgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
-    }
-    return true;
-}
-
-void LimbTorqueController::copyLimbTorqueControllerParam(LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param)
-{
-    i_param_.Pgain = param.pgain;
-    i_param_.Dgain = param.dgain;
-    for (int i = 0; i < 3; i++){
-        i_param_.ee_pgain[i] = param.ee_pgain_p(i,i);
-        i_param_.ee_pgain[i+3] = param.ee_pgain_r(i,i);
-        i_param_.ee_dgain[i] = param.ee_dgain_p(i,i);
-        i_param_.ee_dgain[i+3] = param.ee_dgain_r(i,i);
-    }
-
-    if (param.is_active) i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_ACTIVE;
-    else i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_IDLE;
-}
-
-
-bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_name_, LimbTorqueControllerService::limbtorqueParam& i_param_)
-{
-    if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
-        copyLimbTorqueControllerParam(i_param_, LTParam());
-        return false;
-    }
-    copyLimbTorqueControllerParam(i_param_, m_lt_param[i_name_]);
-    return true;
-}
-
-bool LimbTorqueController::setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_)
-{
-    Guard guard(m_mutex);
-    std::string name = std::string(i_name_);
-    if ( m_lt_col_param.find(name) == m_lt_col_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << name << "]" << std::endl;
-        return false;
-    }
-
-    std::cerr << "[" << m_profile.instance_name << "] Update collision parameters" << std::endl;
-
-    for (unsigned int i=0; i<m_lt_col_param[name].collision_threshold.size(); ++i){
-        m_lt_col_param[name].collision_threshold[i] = i_param_.Thresh[i];
-    }
-    m_lt_col_param[name].cgain = i_param_.Cgain;
-    m_lt_col_param[name].resist_gain = i_param_.Rgain;
-    //m_lt_col_param[name].collisionhandle_p = i_param_.Handle;
-    m_lt_col_param[name].max_collision_uncheck_count = i_param_.MaxCount;
-    //m_lt_col_param[name].test_bool1 = i_param_.TestB1;
-    //m_lt_col_param[name].test_int1 = i_param_.TestI1;
-    m_lt_col_param[name].check_mode = i_param_.CheckMode;
-    m_lt_col_param[name].handle_mode = i_param_.HandleMode;
-    collision_uncheck_count[name] = 0; //initialize to 0(check collision)
-
-    hrp::dvector temp_gains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].cgain);
-    hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].resist_gain);
-    gen_mom_observer_gain[name] = temp_gains.asDiagonal();
-    collision_resistance_gain[name] = temp_rgains.asDiagonal();
-
-    std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "]  Collision Checking Threshold : " << m_lt_col_param[name].collision_threshold.transpose() << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "] Cgain : " << m_lt_col_param[name].cgain << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "] Rgain : " << m_lt_col_param[name].resist_gain << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "] Collision Check Mode : " << m_lt_col_param[name].check_mode << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "] Collision Handle Mode : " << m_lt_col_param[name].handle_mode << std::endl;
-    std::cerr << "[" << m_profile.instance_name << "]      max collision uncheck count(uncheck time = count*hrpsys_periodic_rate) : " << m_lt_col_param[name].max_collision_uncheck_count << std::endl;
-    return true;
-}
-
-void LimbTorqueController::copyCollisionParam(LimbTorqueControllerService::collisionParam& i_param_, const CollisionParam& param)
-{
-    for (size_t i=0; i<param.collision_threshold.size(); ++i){
-        i_param_.Thresh[i] = param.collision_threshold[i];
-    }
-    i_param_.Cgain = param.cgain;
-    i_param_.Rgain = param.resist_gain;
-    i_param_.MaxCount = param.max_collision_uncheck_count;
-    i_param_.CheckMode = param.check_mode;
-    i_param_.HandleMode = param.handle_mode;
-}
-
-bool LimbTorqueController::getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_)
-{
-    if ( m_lt_col_param.find(i_name_) == m_lt_col_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << i_name_ << "]" << std::endl;
-        i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
-        copyCollisionParam(*i_param_, CollisionParam());
-        return false;
-    }
-    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
-    i_param_->Thresh.length(m_lt_col_param[i_name_].collision_threshold.size());
-    copyCollisionParam(*i_param_, m_lt_col_param[i_name_]);
-    return true;
-}
-
-bool LimbTorqueController::getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_)
-{
-    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
-        return false;
-    }
-    c_vec_ = new OpenHRP::LimbTorqueControllerService::DblSequence;
-    c_vec_->length(gen_mom_res[i_name_].size());
-    for (size_t i=0; i<gen_mom_res[i_name_].size(); ++i){
-        c_vec_[i] = gen_mom_res[i_name_](i);
-    }
-    return true;
-}
-
-bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_)
-{
-    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
-        return false;
-    }
-    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionStatus();
-    i_param_->CollisionTorque.length(m_lt_param[i_name_].manip->numJoints());
-    for (int i=0; i<m_lt_param[i_name_].manip->numJoints(); i++){
-        switch(m_lt_col_param[i_name_].check_mode){
-        case 0:
-            i_param_->CollisionTorque[i] = 0;
-        case 1:
-            i_param_->CollisionTorque[i] = gen_mom_res[i_name_](i);
-        }
-    }
-    if (collision_uncheck_count[i_name_] > 0){
-        i_param_->IsCollision = true;
-        i_param_->CollisionLink = collision_link[i_name_].c_str();
-    }else{
-        i_param_->IsCollision = false;
-        i_param_->CollisionLink = "No Collision";
-    }
-    return true;
-}
-
 //method E(Estimation of tau_ext via Momentum Observer) in S.Haddadin et al. "Robot Collisions: A Survey on Detection, Isolation, and Identification," TRO2017
 void LimbTorqueController::CollisionDetector()
 {
@@ -1193,267 +987,6 @@ void LimbTorqueController::calcGeneralizedInertiaMatrix(std::map<std::string, LT
         old_gen_imat[ee_name] = gen_imat[ee_name];
         gen_imat_initialized[ee_name] = true;
     }
-}
-
-void LimbTorqueController::DebugOutput()
-{
-    if (loop%3 == 0){
-        std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-        while (it != m_lt_param.end()){
-            LTParam& param = it->second;
-            std::string ee_name = it->first;
-            CollisionParam& col_param = m_lt_col_param[ee_name];
-            if (param.is_active) {
-                hrp::JointPathExPtr manip = param.manip;
-                int limbdof = manip->numJoints();
-                struct timeval nowtime;
-                gettimeofday(&nowtime, NULL);
-                long int micro_time = nowtime.tv_sec*1e+6 + nowtime.tv_usec;
-                if(log_type == 1){
-                    *(debug_mom[ee_name]) << micro_time;
-                    *(debug_actau[ee_name]) << micro_time;
-                    *(debug_acbet[ee_name]) << micro_time;
-                    *(debug_acres[ee_name]) << micro_time;
-                    *(debug_res[ee_name]) << micro_time;
-                    *(debug_reftq[ee_name]) << micro_time;
-                    *(debug_f[ee_name]) << micro_time;
-                }
-                else if(log_type == 2){
-                    *(debug_ee_pocw[ee_name]) << micro_time;
-                    *(debug_ee_vwcw[ee_name]) << micro_time;
-                    *(debug_eect[ee_name]) << micro_time;
-                    *(debug_nst[ee_name]) << micro_time;
-                    *(debug_ee_poserror[ee_name]) << micro_time;
-                    *(debug_ee_orierror[ee_name]) << micro_time;
-                    *(debug_ee_velerror[ee_name]) << micro_time;
-                    *(debug_ee_werror[ee_name]) << micro_time;
-                    *(debug_reftq[ee_name]) << micro_time;
-                    *(debug_acteevel[ee_name]) << micro_time;
-                    *(debug_refeevel[ee_name]) << micro_time;
-                    *(debug_acteew[ee_name]) << micro_time;
-                    *(debug_refeew[ee_name]) << micro_time;
-                    *(debug_dqest[ee_name]) << micro_time;
-                    *(debug_dqact[ee_name]) << micro_time;
-                    *(debug_qest[ee_name]) << micro_time;
-                    *(debug_qact[ee_name]) << micro_time;
-                    *(debug_qref[ee_name]) << micro_time;
-                    *(debug_acteescrew[ee_name]) << micro_time;
-                    *(debug_esteescrew[ee_name]) << micro_time;
-                    *(debug_acteewrench[ee_name]) << micro_time;
-                    *(debug_esteewrench[ee_name]) << micro_time;
-                    *(debug_vel_discrepancy[ee_name]) << micro_time;
-                    *(debug_force_inc[ee_name]) << micro_time;
-                }
-                if(log_type == 1){
-                    //calc external force
-                    hrp::dvector external_force = hrp::dvector::Zero(6);
-                    hrp::dmatrix inv_j(manip->numJoints(), 6);
-                    hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
-                    external_force = inv_j * gen_mom_res[ee_name];
-                    for (unsigned int i=0; i<limbdof; ++i){
-                        *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
-                        *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
-                        *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
-                        *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
-                        *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
-                        *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
-                    }
-                    for (unsigned int i=0; i<6; ++i){
-                        *(debug_f[ee_name]) << " " << external_force(i);
-                    }
-                    *(debug_mom[ee_name]) << std::endl;
-                    *(debug_actau[ee_name]) << std::endl;
-                    *(debug_acbet[ee_name]) << std::endl;
-                    *(debug_acres[ee_name]) << std::endl;
-                    *(debug_res[ee_name]) << std::endl;
-                    *(debug_reftq[ee_name]) << std::endl;
-                    *(debug_f[ee_name]) << std::endl;
-                }
-                else if(log_type == 2){
-                    for (int i=0; i<3; i++){
-                        *(debug_ee_poserror[ee_name]) << " " << ee_pos_error[ee_name](i);
-                        *(debug_ee_orierror[ee_name]) << " " << ee_ori_error[ee_name](i);
-                        *(debug_ee_velerror[ee_name]) << " " << ee_vel_error[ee_name](i);
-                        *(debug_ee_werror[ee_name]) << " " << ee_w_error[ee_name](i);
-                        *(debug_acteevel[ee_name]) << " " << act_ee_vel[ee_name](i);
-                        *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
-                        *(debug_acteew[ee_name]) << " " << act_ee_w[ee_name](i);
-                        *(debug_refeew[ee_name]) << " " << ref_ee_w[ee_name](i);
-                    }
-                    for (int i=0; i<6; i++){
-                        *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
-                        *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
-                        *(debug_esteescrew[ee_name]) << " " << filtered_screw[ee_name](i);
-                        *(debug_esteewrench[ee_name]) << " " << filtered_wrench[ee_name](i);
-                    }
-                    for (int i=0; i<3; i++){
-                        *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
-                        *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
-                        *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
-                        *(debug_force_inc[ee_name]) << " " << force_increase[ee_name](i);
-                    }
-                    for (int i=0; i<3; i++){
-                        *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
-                        *(debug_acteewrench[ee_name]) << " " << abs_moments[param.sensor_name](i);
-                    }
-                    for (int i=0; i<limbdof; i++){
-                        *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
-                        *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
-                        *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
-                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
-                        *(debug_dqact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
-                        *(debug_qest[ee_name]) << " " << log_est_q(manip->joint(i)->jointId);
-                        *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
-                        *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
-                    }
-                    *(debug_ee_pocw[ee_name]) << std::endl;
-                    *(debug_ee_vwcw[ee_name]) << std::endl;
-                    *(debug_eect[ee_name]) << std::endl;
-                    *(debug_nst[ee_name]) << std::endl;
-                    *(debug_ee_poserror[ee_name]) << std::endl;
-                    *(debug_ee_orierror[ee_name]) << std::endl;
-                    *(debug_ee_velerror[ee_name]) << std::endl;
-                    *(debug_ee_werror[ee_name]) << std::endl;
-                    *(debug_reftq[ee_name]) << std::endl;
-                    *(debug_acteevel[ee_name]) << std::endl;
-                    *(debug_refeevel[ee_name]) << std::endl;
-                    *(debug_acteew[ee_name]) << std::endl;
-                    *(debug_refeew[ee_name]) << std::endl;
-                    *(debug_dqest[ee_name]) << std::endl;
-                    *(debug_dqact[ee_name]) << std::endl;
-                    *(debug_qest[ee_name]) << std::endl;
-                    *(debug_qact[ee_name]) << std::endl;
-                    *(debug_qref[ee_name]) << std::endl;
-                    *(debug_acteescrew[ee_name]) << std::endl;
-                    *(debug_esteescrew[ee_name]) << std::endl;
-                    *(debug_acteewrench[ee_name]) << std::endl;
-                    *(debug_esteewrench[ee_name]) << std::endl;
-                    *(debug_vel_discrepancy[ee_name]) << std::endl;
-                    *(debug_force_inc[ee_name]) << std::endl;
-                }
-            }
-            it++;
-        }
-    }
-}
-
-//i_name_: base file path of log
-//i_logname_: what log to take; "collision" or "operational"
-bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
-{
-    Guard guard(m_mutex);
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            std::string ee_name = it->first;
-            struct stat st;
-            std::string basepath = i_name_ + std::string("/LimbTorqueControllerDebug/");
-            if(stat(basepath.c_str(), &st) != 0){
-                mkdir(basepath.c_str(), 0775);
-            }
-            std::string logpath = basepath + ee_name + std::string("_");
-            if (boost::iequals(i_logname_, "collision")){
-                debug_mom[ee_name] = new std::ofstream((logpath + std::string("gen_mom.dat")).c_str());
-                debug_actau[ee_name] = new std::ofstream((logpath + std::string("ac_tau.dat")).c_str());
-                debug_acbet[ee_name] = new std::ofstream((logpath + std::string("ac_beta.dat")).c_str());
-                debug_acres[ee_name] = new std::ofstream((logpath + std::string("ac_res.dat")).c_str());
-                debug_res[ee_name] = new std::ofstream((logpath +std::string("res.dat")).c_str());
-                debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
-                debug_f[ee_name] = new std::ofstream((logpath + std::string("ext_f.dat")).c_str());
-                log_type = 1;
-                spit_log = true;
-                std::cout << "[ltc] startLog succeed: open log stream for collision detection!!" << std::endl;
-            }
-            else if (boost::iequals(i_logname_, "operational")){
-                debug_ee_pocw[ee_name] = new std::ofstream((logpath + std::string("ee_pos_ori_wrench.dat")).c_str());
-                debug_ee_vwcw[ee_name] = new std::ofstream((logpath + std::string("ee_vel_w_wrench.dat")).c_str());
-                debug_eect[ee_name] = new std::ofstream((logpath + std::string("ee_comp_torque.dat")).c_str());
-                debug_nst[ee_name] = new std::ofstream((logpath + std::string("null_space_torque.dat")).c_str());
-                debug_ee_poserror[ee_name] = new std::ofstream((logpath + std::string("ee_pos_error.dat")).c_str());
-                debug_ee_orierror[ee_name] = new std::ofstream((logpath + std::string("ee_ori_error.dat")).c_str());
-                debug_ee_velerror[ee_name] = new std::ofstream((logpath + std::string("ee_vel_error.dat")).c_str());
-                debug_ee_werror[ee_name] = new std::ofstream((logpath + std::string("ee_w_error.dat")).c_str());
-                debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
-                debug_acteevel[ee_name] = new std::ofstream((logpath  + std::string("act_ee_vel.dat")).c_str());
-                debug_refeevel[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_vel.dat")).c_str());
-                debug_acteew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_w.dat")).c_str());
-                debug_refeew[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_w.dat")).c_str());
-                debug_dqest[ee_name] = new std::ofstream((logpath  + std::string("est_dq.dat")).c_str());
-                debug_dqact[ee_name] = new std::ofstream((logpath  + std::string("act_dq.dat")).c_str());
-                debug_qest[ee_name] = new std::ofstream((logpath  + std::string("qest.dat")).c_str());
-                debug_qact[ee_name] = new std::ofstream((logpath  + std::string("qact.dat")).c_str());
-                debug_qref[ee_name] = new std::ofstream((logpath  + std::string("qref.dat")).c_str());
-                debug_acteescrew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_screw.dat")).c_str());
-                debug_esteescrew[ee_name] = new std::ofstream((logpath  + std::string("est_ee_screw.dat")).c_str());
-                debug_acteewrench[ee_name] = new std::ofstream((logpath  + std::string("act_ee_wrench.dat")).c_str());
-                debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
-                debug_vel_discrepancy[ee_name] = new std::ofstream((logpath  + std::string("vel_discrepancy.dat")).c_str());
-                debug_force_inc[ee_name] = new std::ofstream((logpath  + std::string("force_increase.dat")).c_str());
-                log_type = 2;
-                spit_log = true;
-                std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
-            }
-            else{
-                std::cerr << "[ltc] startLog error: allowed logname are: 'collision' or 'operational'. You commanded " << i_logname_ << "." << std::endl;
-                return false;
-            }
-        }
-        it++;
-    }
-    return true;
-}
-
-bool LimbTorqueController::stopLog()
-{
-    Guard guard(m_mutex);
-    spit_log = false;
-    log_type = 0;
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) { //TODO: delete ofstream when LTC goes inactive during taking log?
-            std::string ee_name = it->first;
-            if(log_type == 1){
-                delete debug_mom[ee_name];
-                delete debug_actau[ee_name];
-                delete debug_acbet[ee_name];
-                delete debug_acres[ee_name];
-                delete debug_res[ee_name];
-                delete debug_reftq[ee_name];
-                delete debug_f[ee_name];
-            }
-            else if(log_type == 2){
-                delete debug_ee_pocw[ee_name];
-                delete debug_ee_vwcw[ee_name];
-                delete debug_eect[ee_name];
-                delete debug_nst[ee_name];
-                delete debug_ee_poserror[ee_name];
-                delete debug_ee_orierror[ee_name];
-                delete debug_ee_velerror[ee_name];
-                delete debug_ee_werror[ee_name];
-                delete debug_reftq[ee_name];
-                delete debug_acteevel[ee_name];
-                delete debug_refeevel[ee_name];
-                delete debug_acteew[ee_name];
-                delete debug_refeew[ee_name];
-                delete debug_dqest[ee_name];
-                delete debug_dqact[ee_name];
-                delete debug_qest[ee_name];
-                delete debug_qact[ee_name];
-                delete debug_qref[ee_name];
-                delete debug_acteescrew[ee_name];
-                delete debug_esteescrew[ee_name];
-                delete debug_acteewrench[ee_name];
-                delete debug_esteewrench[ee_name];
-                delete debug_vel_discrepancy[ee_name];
-                delete debug_force_inc[ee_name];
-            }
-        }
-        it++;
-    }
-    std::cout << "[ltc] successfully stop log!!" << std::endl;
-    return true;
 }
 
 void LimbTorqueController::calcEECompensation()
@@ -1678,35 +1211,6 @@ void LimbTorqueController::estimateRefdq()
     }
 }
 
-// start overwriting qRef with qRef+estimated_ref_vel * dt
-// do not call during position control
-bool LimbTorqueController::startRefdqEstimation(const std::string& i_name_)
-{
-    Guard guard(m_mutex);
-    std::string name = std::string(i_name_);
-    if ( m_lt_param.find(name) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
-        return false;
-    }
-    overwrite_refangle[name] = true;
-    std::cout << "[" << m_profile.instance_name << "] start overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
-    return true;
-}
-
-// stop overwriting qRef, using transition. do not use normally?
-bool LimbTorqueController::stopRefdqEstimation(const std::string& i_name_)
-{
-    Guard guard(m_mutex);
-    std::string name = std::string(i_name_);
-    if ( m_lt_param.find(name) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
-        return false;
-    }
-    stop_overwriting_q_transition_count[name] = max_stop_overwriting_q_transition_count;
-    std::cout << "[" << m_profile.instance_name << "] stop overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
-    return true;
-}
-
 // assuming isotropic gain, mass, inertia
 void LimbTorqueController::estimateEEVelForce()
 {
@@ -1846,6 +1350,502 @@ void LimbTorqueController::DisturbanceObserver()
         }
         it++;
     }
+}
+
+void LimbTorqueController::DebugOutput()
+{
+    if (loop%3 == 0){
+        std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+        while (it != m_lt_param.end()){
+            LTParam& param = it->second;
+            std::string ee_name = it->first;
+            CollisionParam& col_param = m_lt_col_param[ee_name];
+            if (param.is_active) {
+                hrp::JointPathExPtr manip = param.manip;
+                int limbdof = manip->numJoints();
+                struct timeval nowtime;
+                gettimeofday(&nowtime, NULL);
+                long int micro_time = nowtime.tv_sec*1e+6 + nowtime.tv_usec;
+                if(log_type == 1){
+                    *(debug_mom[ee_name]) << micro_time;
+                    *(debug_actau[ee_name]) << micro_time;
+                    *(debug_acbet[ee_name]) << micro_time;
+                    *(debug_acres[ee_name]) << micro_time;
+                    *(debug_res[ee_name]) << micro_time;
+                    *(debug_reftq[ee_name]) << micro_time;
+                    *(debug_f[ee_name]) << micro_time;
+                }
+                else if(log_type == 2){
+                    *(debug_ee_pocw[ee_name]) << micro_time;
+                    *(debug_ee_vwcw[ee_name]) << micro_time;
+                    *(debug_eect[ee_name]) << micro_time;
+                    *(debug_nst[ee_name]) << micro_time;
+                    *(debug_ee_poserror[ee_name]) << micro_time;
+                    *(debug_ee_orierror[ee_name]) << micro_time;
+                    *(debug_ee_velerror[ee_name]) << micro_time;
+                    *(debug_ee_werror[ee_name]) << micro_time;
+                    *(debug_reftq[ee_name]) << micro_time;
+                    *(debug_acteevel[ee_name]) << micro_time;
+                    *(debug_refeevel[ee_name]) << micro_time;
+                    *(debug_acteew[ee_name]) << micro_time;
+                    *(debug_refeew[ee_name]) << micro_time;
+                    *(debug_dqest[ee_name]) << micro_time;
+                    *(debug_dqact[ee_name]) << micro_time;
+                    *(debug_qest[ee_name]) << micro_time;
+                    *(debug_qact[ee_name]) << micro_time;
+                    *(debug_qref[ee_name]) << micro_time;
+                    *(debug_acteescrew[ee_name]) << micro_time;
+                    *(debug_esteescrew[ee_name]) << micro_time;
+                    *(debug_acteewrench[ee_name]) << micro_time;
+                    *(debug_esteewrench[ee_name]) << micro_time;
+                    *(debug_vel_discrepancy[ee_name]) << micro_time;
+                    *(debug_force_inc[ee_name]) << micro_time;
+                }
+                if(log_type == 1){
+                    //calc external force
+                    hrp::dvector external_force = hrp::dvector::Zero(6);
+                    hrp::dmatrix inv_j(manip->numJoints(), 6);
+                    hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
+                    external_force = inv_j * gen_mom_res[ee_name];
+                    for (unsigned int i=0; i<limbdof; ++i){
+                        *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
+                        *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
+                        *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
+                        *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
+                        *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
+                        *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
+                    }
+                    for (unsigned int i=0; i<6; ++i){
+                        *(debug_f[ee_name]) << " " << external_force(i);
+                    }
+                    *(debug_mom[ee_name]) << std::endl;
+                    *(debug_actau[ee_name]) << std::endl;
+                    *(debug_acbet[ee_name]) << std::endl;
+                    *(debug_acres[ee_name]) << std::endl;
+                    *(debug_res[ee_name]) << std::endl;
+                    *(debug_reftq[ee_name]) << std::endl;
+                    *(debug_f[ee_name]) << std::endl;
+                }
+                else if(log_type == 2){
+                    for (int i=0; i<3; i++){
+                        *(debug_ee_poserror[ee_name]) << " " << ee_pos_error[ee_name](i);
+                        *(debug_ee_orierror[ee_name]) << " " << ee_ori_error[ee_name](i);
+                        *(debug_ee_velerror[ee_name]) << " " << ee_vel_error[ee_name](i);
+                        *(debug_ee_werror[ee_name]) << " " << ee_w_error[ee_name](i);
+                        *(debug_acteevel[ee_name]) << " " << act_ee_vel[ee_name](i);
+                        *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
+                        *(debug_acteew[ee_name]) << " " << act_ee_w[ee_name](i);
+                        *(debug_refeew[ee_name]) << " " << ref_ee_w[ee_name](i);
+                    }
+                    for (int i=0; i<6; i++){
+                        *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
+                        *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
+                        *(debug_esteescrew[ee_name]) << " " << filtered_screw[ee_name](i);
+                        *(debug_esteewrench[ee_name]) << " " << filtered_wrench[ee_name](i);
+                    }
+                    for (int i=0; i<3; i++){
+                        *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
+                        *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
+                        *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
+                        *(debug_force_inc[ee_name]) << " " << force_increase[ee_name](i);
+                    }
+                    for (int i=0; i<3; i++){
+                        *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
+                        *(debug_acteewrench[ee_name]) << " " << abs_moments[param.sensor_name](i);
+                    }
+                    for (int i=0; i<limbdof; i++){
+                        *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
+                        *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
+                        *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
+                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
+                        *(debug_dqact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
+                        *(debug_qest[ee_name]) << " " << log_est_q(manip->joint(i)->jointId);
+                        *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
+                        *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
+                    }
+                    *(debug_ee_pocw[ee_name]) << std::endl;
+                    *(debug_ee_vwcw[ee_name]) << std::endl;
+                    *(debug_eect[ee_name]) << std::endl;
+                    *(debug_nst[ee_name]) << std::endl;
+                    *(debug_ee_poserror[ee_name]) << std::endl;
+                    *(debug_ee_orierror[ee_name]) << std::endl;
+                    *(debug_ee_velerror[ee_name]) << std::endl;
+                    *(debug_ee_werror[ee_name]) << std::endl;
+                    *(debug_reftq[ee_name]) << std::endl;
+                    *(debug_acteevel[ee_name]) << std::endl;
+                    *(debug_refeevel[ee_name]) << std::endl;
+                    *(debug_acteew[ee_name]) << std::endl;
+                    *(debug_refeew[ee_name]) << std::endl;
+                    *(debug_dqest[ee_name]) << std::endl;
+                    *(debug_dqact[ee_name]) << std::endl;
+                    *(debug_qest[ee_name]) << std::endl;
+                    *(debug_qact[ee_name]) << std::endl;
+                    *(debug_qref[ee_name]) << std::endl;
+                    *(debug_acteescrew[ee_name]) << std::endl;
+                    *(debug_esteescrew[ee_name]) << std::endl;
+                    *(debug_acteewrench[ee_name]) << std::endl;
+                    *(debug_esteewrench[ee_name]) << std::endl;
+                    *(debug_vel_discrepancy[ee_name]) << std::endl;
+                    *(debug_force_inc[ee_name]) << std::endl;
+                }
+            }
+            it++;
+        }
+    }
+}
+
+bool LimbTorqueController::startLimbTorqueController(const std::string& i_name_)
+{
+    {
+        Guard guard(m_mutex);
+        if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
+            std::cerr << "[" << m_profile.instance_name << "] Could not find limbtorque controller param [" << i_name_ << "]" << std::endl;
+            return false;
+        }
+        if ( m_lt_param[i_name_].is_active ) {
+            std::cerr << "[" << m_profile.instance_name << "] Limbtorque control [" << i_name_ << "] is already started" << std::endl;
+            return false;
+        }
+        std::cerr << "[" << m_profile.instance_name << "] Start limbtorque control [" << i_name_ << "]" << std::endl;
+        m_lt_param[i_name_].is_active = true;
+        m_ref_lt_param[i_name_].is_active = true;
+    }
+    return true;
+}
+
+bool LimbTorqueController::stopLimbTorqueController(const std::string& i_name_)
+{
+    {
+        Guard guard(m_mutex);
+        if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
+            std::cerr << "[" << m_profile.instance_name << "] Could not find limbtorque controller param [" << i_name_ << "]" << std::endl;
+            return false;
+        }
+        if ( !m_lt_param[i_name_].is_active ) {
+            std::cerr << "[" << m_profile.instance_name << "] Limbtorque control [" << i_name_ << "] is already stopped" << std::endl;
+            return false;
+        }
+        std::cerr << "[" << m_profile.instance_name << "] Stop limbtorque control [" << i_name_ << "]" << std::endl;
+        //TODO: transition?
+        m_lt_param[i_name_].is_active = false;
+        m_ref_lt_param[i_name_].is_active = false;
+    }
+    return true;
+}
+
+bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam i_param_)
+{
+    {
+        Guard guard(m_mutex);
+        std::string name = std::string(i_name_);
+        if ( m_lt_param.find(name) == m_lt_param.end() ) {
+            std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
+            return false;
+        }
+
+        std::cerr << "[" << m_profile.instance_name << "] Update limb toruqe parameters" << std::endl;
+
+        m_lt_param[name].pgain = i_param_.Pgain;
+        m_lt_param[name].dgain = i_param_.Dgain;
+
+        hrp::dvector ee_pgain_vec(6), ee_dgain_vec(6);
+        ee_pgain_vec << i_param_.ee_pgain[0], i_param_.ee_pgain[1], i_param_.ee_pgain[2], i_param_.ee_pgain[3], i_param_.ee_pgain[4], i_param_.ee_pgain[5];
+        ee_dgain_vec << i_param_.ee_dgain[0], i_param_.ee_dgain[1], i_param_.ee_dgain[2], i_param_.ee_dgain[3], i_param_.ee_dgain[4], i_param_.ee_dgain[5];
+        m_lt_param[name].ee_pgain_p = ee_pgain_vec.head(3).asDiagonal();
+        m_lt_param[name].ee_pgain_r = ee_pgain_vec.tail(3).asDiagonal();
+        m_lt_param[name].ee_dgain_p = ee_dgain_vec.head(3).asDiagonal();
+        m_lt_param[name].ee_dgain_r = ee_dgain_vec.tail(3).asDiagonal();
+        hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
+        hrp::dmatrix concatenated_dgain = ee_dgain_vec.asDiagonal();  //just for print
+
+        std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]       ee_pgain : " << concatenated_pgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "]      ee_dgain : " << concatenated_dgain.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+    }
+    return true;
+}
+
+void LimbTorqueController::copyLimbTorqueControllerParam(LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param)
+{
+    i_param_.Pgain = param.pgain;
+    i_param_.Dgain = param.dgain;
+    for (int i = 0; i < 3; i++){
+        i_param_.ee_pgain[i] = param.ee_pgain_p(i,i);
+        i_param_.ee_pgain[i+3] = param.ee_pgain_r(i,i);
+        i_param_.ee_dgain[i] = param.ee_dgain_p(i,i);
+        i_param_.ee_dgain[i+3] = param.ee_dgain_r(i,i);
+    }
+
+    if (param.is_active) i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_ACTIVE;
+    else i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_IDLE;
+}
+
+
+bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_name_, LimbTorqueControllerService::limbtorqueParam& i_param_)
+{
+    if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
+        copyLimbTorqueControllerParam(i_param_, LTParam());
+        return false;
+    }
+    copyLimbTorqueControllerParam(i_param_, m_lt_param[i_name_]);
+    return true;
+}
+
+bool LimbTorqueController::setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_col_param.find(name) == m_lt_col_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << name << "]" << std::endl;
+        return false;
+    }
+
+    std::cerr << "[" << m_profile.instance_name << "] Update collision parameters" << std::endl;
+
+    for (unsigned int i=0; i<m_lt_col_param[name].collision_threshold.size(); ++i){
+        m_lt_col_param[name].collision_threshold[i] = i_param_.Thresh[i];
+    }
+    m_lt_col_param[name].cgain = i_param_.Cgain;
+    m_lt_col_param[name].resist_gain = i_param_.Rgain;
+    //m_lt_col_param[name].collisionhandle_p = i_param_.Handle;
+    m_lt_col_param[name].max_collision_uncheck_count = i_param_.MaxCount;
+    //m_lt_col_param[name].test_bool1 = i_param_.TestB1;
+    //m_lt_col_param[name].test_int1 = i_param_.TestI1;
+    m_lt_col_param[name].check_mode = i_param_.CheckMode;
+    m_lt_col_param[name].handle_mode = i_param_.HandleMode;
+    collision_uncheck_count[name] = 0; //initialize to 0(check collision)
+
+    hrp::dvector temp_gains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].cgain);
+    hrp::dvector temp_rgains = hrp::dvector::Constant(m_lt_param[name].manip->numJoints(), m_lt_col_param[name].resist_gain);
+    gen_mom_observer_gain[name] = temp_gains.asDiagonal();
+    collision_resistance_gain[name] = temp_rgains.asDiagonal();
+
+    std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]  Collision Checking Threshold : " << m_lt_col_param[name].collision_threshold.transpose() << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Cgain : " << m_lt_col_param[name].cgain << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Rgain : " << m_lt_col_param[name].resist_gain << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Collision Check Mode : " << m_lt_col_param[name].check_mode << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "] Collision Handle Mode : " << m_lt_col_param[name].handle_mode << std::endl;
+    std::cerr << "[" << m_profile.instance_name << "]      max collision uncheck count(uncheck time = count*hrpsys_periodic_rate) : " << m_lt_col_param[name].max_collision_uncheck_count << std::endl;
+    return true;
+}
+
+void LimbTorqueController::copyCollisionParam(LimbTorqueControllerService::collisionParam& i_param_, const CollisionParam& param)
+{
+    for (size_t i=0; i<param.collision_threshold.size(); ++i){
+        i_param_.Thresh[i] = param.collision_threshold[i];
+    }
+    i_param_.Cgain = param.cgain;
+    i_param_.Rgain = param.resist_gain;
+    i_param_.MaxCount = param.max_collision_uncheck_count;
+    i_param_.CheckMode = param.check_mode;
+    i_param_.HandleMode = param.handle_mode;
+}
+
+bool LimbTorqueController::getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_)
+{
+    if ( m_lt_col_param.find(i_name_) == m_lt_col_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find collision param [" << i_name_ << "]" << std::endl;
+        i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
+        copyCollisionParam(*i_param_, CollisionParam());
+        return false;
+    }
+    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionParam();
+    i_param_->Thresh.length(m_lt_col_param[i_name_].collision_threshold.size());
+    copyCollisionParam(*i_param_, m_lt_col_param[i_name_]);
+    return true;
+}
+
+bool LimbTorqueController::getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_)
+{
+    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
+        return false;
+    }
+    c_vec_ = new OpenHRP::LimbTorqueControllerService::DblSequence;
+    c_vec_->length(gen_mom_res[i_name_].size());
+    for (size_t i=0; i<gen_mom_res[i_name_].size(); ++i){
+        c_vec_[i] = gen_mom_res[i_name_](i);
+    }
+    return true;
+}
+
+bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_)
+{
+    if ( gen_mom_res.find(i_name_) == gen_mom_res.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << i_name_ << "]" << std::endl;
+        return false;
+    }
+    i_param_ = new OpenHRP::LimbTorqueControllerService::collisionStatus();
+    i_param_->CollisionTorque.length(m_lt_param[i_name_].manip->numJoints());
+    for (int i=0; i<m_lt_param[i_name_].manip->numJoints(); i++){
+        switch(m_lt_col_param[i_name_].check_mode){
+        case 0:
+            i_param_->CollisionTorque[i] = 0;
+        case 1:
+            i_param_->CollisionTorque[i] = gen_mom_res[i_name_](i);
+        }
+    }
+    if (collision_uncheck_count[i_name_] > 0){
+        i_param_->IsCollision = true;
+        i_param_->CollisionLink = collision_link[i_name_].c_str();
+    }else{
+        i_param_->IsCollision = false;
+        i_param_->CollisionLink = "No Collision";
+    }
+    return true;
+}
+
+// start overwriting qRef with qRef+estimated_ref_vel * dt
+// do not call during position control
+bool LimbTorqueController::startRefdqEstimation(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
+        return false;
+    }
+    overwrite_refangle[name] = true;
+    std::cout << "[" << m_profile.instance_name << "] start overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
+    return true;
+}
+
+// stop overwriting qRef, using transition. do not use normally?
+bool LimbTorqueController::stopRefdqEstimation(const std::string& i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(name) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
+        return false;
+    }
+    stop_overwriting_q_transition_count[name] = max_stop_overwriting_q_transition_count;
+    std::cout << "[" << m_profile.instance_name << "] stop overwriting ref angle of " << name << " with estimated reference velocity!" << std::endl;
+    return true;
+}
+
+//i_name_: base file path of log
+//i_logname_: what log to take; "collision" or "operational"
+bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
+{
+    Guard guard(m_mutex);
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            std::string ee_name = it->first;
+            struct stat st;
+            std::string basepath = i_name_ + std::string("/LimbTorqueControllerDebug/");
+            if(stat(basepath.c_str(), &st) != 0){
+                mkdir(basepath.c_str(), 0775);
+            }
+            std::string logpath = basepath + ee_name + std::string("_");
+            if (boost::iequals(i_logname_, "collision")){
+                debug_mom[ee_name] = new std::ofstream((logpath + std::string("gen_mom.dat")).c_str());
+                debug_actau[ee_name] = new std::ofstream((logpath + std::string("ac_tau.dat")).c_str());
+                debug_acbet[ee_name] = new std::ofstream((logpath + std::string("ac_beta.dat")).c_str());
+                debug_acres[ee_name] = new std::ofstream((logpath + std::string("ac_res.dat")).c_str());
+                debug_res[ee_name] = new std::ofstream((logpath +std::string("res.dat")).c_str());
+                debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
+                debug_f[ee_name] = new std::ofstream((logpath + std::string("ext_f.dat")).c_str());
+                log_type = 1;
+                spit_log = true;
+                std::cout << "[ltc] startLog succeed: open log stream for collision detection!!" << std::endl;
+            }
+            else if (boost::iequals(i_logname_, "operational")){
+                debug_ee_pocw[ee_name] = new std::ofstream((logpath + std::string("ee_pos_ori_wrench.dat")).c_str());
+                debug_ee_vwcw[ee_name] = new std::ofstream((logpath + std::string("ee_vel_w_wrench.dat")).c_str());
+                debug_eect[ee_name] = new std::ofstream((logpath + std::string("ee_comp_torque.dat")).c_str());
+                debug_nst[ee_name] = new std::ofstream((logpath + std::string("null_space_torque.dat")).c_str());
+                debug_ee_poserror[ee_name] = new std::ofstream((logpath + std::string("ee_pos_error.dat")).c_str());
+                debug_ee_orierror[ee_name] = new std::ofstream((logpath + std::string("ee_ori_error.dat")).c_str());
+                debug_ee_velerror[ee_name] = new std::ofstream((logpath + std::string("ee_vel_error.dat")).c_str());
+                debug_ee_werror[ee_name] = new std::ofstream((logpath + std::string("ee_w_error.dat")).c_str());
+                debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
+                debug_acteevel[ee_name] = new std::ofstream((logpath  + std::string("act_ee_vel.dat")).c_str());
+                debug_refeevel[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_vel.dat")).c_str());
+                debug_acteew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_w.dat")).c_str());
+                debug_refeew[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_w.dat")).c_str());
+                debug_dqest[ee_name] = new std::ofstream((logpath  + std::string("est_dq.dat")).c_str());
+                debug_dqact[ee_name] = new std::ofstream((logpath  + std::string("act_dq.dat")).c_str());
+                debug_qest[ee_name] = new std::ofstream((logpath  + std::string("qest.dat")).c_str());
+                debug_qact[ee_name] = new std::ofstream((logpath  + std::string("qact.dat")).c_str());
+                debug_qref[ee_name] = new std::ofstream((logpath  + std::string("qref.dat")).c_str());
+                debug_acteescrew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_screw.dat")).c_str());
+                debug_esteescrew[ee_name] = new std::ofstream((logpath  + std::string("est_ee_screw.dat")).c_str());
+                debug_acteewrench[ee_name] = new std::ofstream((logpath  + std::string("act_ee_wrench.dat")).c_str());
+                debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
+                debug_vel_discrepancy[ee_name] = new std::ofstream((logpath  + std::string("vel_discrepancy.dat")).c_str());
+                debug_force_inc[ee_name] = new std::ofstream((logpath  + std::string("force_increase.dat")).c_str());
+                log_type = 2;
+                spit_log = true;
+                std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
+            }
+            else{
+                std::cerr << "[ltc] startLog error: allowed logname are: 'collision' or 'operational'. You commanded " << i_logname_ << "." << std::endl;
+                return false;
+            }
+        }
+        it++;
+    }
+    return true;
+}
+
+bool LimbTorqueController::stopLog()
+{
+    Guard guard(m_mutex);
+    spit_log = false;
+    log_type = 0;
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) { //TODO: delete ofstream when LTC goes inactive during taking log?
+            std::string ee_name = it->first;
+            if(log_type == 1){
+                delete debug_mom[ee_name];
+                delete debug_actau[ee_name];
+                delete debug_acbet[ee_name];
+                delete debug_acres[ee_name];
+                delete debug_res[ee_name];
+                delete debug_reftq[ee_name];
+                delete debug_f[ee_name];
+            }
+            else if(log_type == 2){
+                delete debug_ee_pocw[ee_name];
+                delete debug_ee_vwcw[ee_name];
+                delete debug_eect[ee_name];
+                delete debug_nst[ee_name];
+                delete debug_ee_poserror[ee_name];
+                delete debug_ee_orierror[ee_name];
+                delete debug_ee_velerror[ee_name];
+                delete debug_ee_werror[ee_name];
+                delete debug_reftq[ee_name];
+                delete debug_acteevel[ee_name];
+                delete debug_refeevel[ee_name];
+                delete debug_acteew[ee_name];
+                delete debug_refeew[ee_name];
+                delete debug_dqest[ee_name];
+                delete debug_dqact[ee_name];
+                delete debug_qest[ee_name];
+                delete debug_qact[ee_name];
+                delete debug_qref[ee_name];
+                delete debug_acteescrew[ee_name];
+                delete debug_esteescrew[ee_name];
+                delete debug_acteewrench[ee_name];
+                delete debug_esteewrench[ee_name];
+                delete debug_vel_discrepancy[ee_name];
+                delete debug_force_inc[ee_name];
+            }
+        }
+        it++;
+    }
+    std::cout << "[ltc] successfully stop log!!" << std::endl;
+    return true;
 }
 
 extern "C"

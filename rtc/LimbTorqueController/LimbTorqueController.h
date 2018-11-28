@@ -101,8 +101,8 @@ public:
     bool getCollisionStatus(const std::string& i_name_, LimbTorqueControllerService::collisionStatus_out i_param_);
     bool startLog(const std::string& i_name_, const std::string& i_logname_);
     bool stopLog();
-    bool startRefVelEstimation(const std::string& i_name_);
-    bool stopRefVelEstimation(const std::string& i_name_);
+    bool startRefdqEstimation(const std::string& i_name_);
+    bool stopRefdqEstimation(const std::string& i_name_);
 
 protected:
 
@@ -152,7 +152,6 @@ private:
         hrp::Vector3 localPos;
         hrp::Matrix33 localR;
     };
-    enum {CALC_TORQUE, REF_TORQUE} torque_output_type;
     struct CollisionParam{
         hrp::dvector collision_threshold;
         double cgain, resist_gain;  //collision observer gain, collision resistance gain
@@ -167,34 +166,25 @@ private:
     void calcForceMoment();
     void getActualParameters();
     void calcLimbInverseDynamics();
-    void calcGravityCompensation();
-    void calcJointDumpingTorque();
     void calcMinMaxAvoidanceTorque();
-    void addDumpingToRefTorque();
-    void CollisionDetector1(std::map<std::string, LTParam>::iterator it);
-    void CollisionDetector2(std::map<std::string, LTParam>::iterator it);
-    void CollisionDetector3(std::map<std::string, LTParam>::iterator it);
     void calcEECompensation();
     void calcNullJointDumping();
-    void estimateRefVel();
+    void estimateRefdq();
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
     std::map<std::string, CollisionParam> m_lt_col_param;
     std::map<std::string, ee_trans> ee_map;
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
-    std::map<std::string, hrp::dvector> resist_direction;
-    std::map<std::string, hrp::dmatrix> act_ee_jacobian, ref_ee_jacobian, inv_ee_jacobian, inv_ee_jacobian_t;
+    std::map<std::string, hrp::dmatrix> act_ee_jacobian, inv_ee_jacobian;
     //for ee compensation
     std::map<std::string, hrp::Vector3> ee_pos_comp_force, ee_ori_comp_moment, ee_vel_comp_force, ee_w_comp_moment;
     std::map<std::string, hrp::dvector> ee_pos_ori_comp_wrench, ee_vel_w_comp_wrench;
     std::map<std::string, hrp::dvector> ee_compensation_torque;
-    //std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_ref_ee_rot;
     std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_ref_ee_pos;
     std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel, act_ee_w, ref_ee_w;
-    std::map<std::string, hrp::dvector> dq_for_each_arm; //for debug log
     std::map<std::string, hrp::Vector3> ee_vel_error, ee_w_error;
     std::map<std::string, RMSfilter<hrp::Vector3> > ee_vel_filter;
     std::map<std::string, RMSfilter<hrp::Matrix33> > ee_w_filter;
@@ -217,39 +207,35 @@ private:
     std::vector<double> temp_invdyn_result;
 
     void CollisionDetector();
-    void CollisionHandler();
     void calcGeneralizedInertiaMatrix(std::map<std::string, LTParam>::iterator it);
     std::map<std::string, hrp::dmatrix> gen_imat, old_gen_imat; //generalized inertia matrix
-    std::map<std::string, hrp::dmatrix> limb_inertia_matrix;
     std::map<std::string, hrp::dvector> gen_mom, old_gen_mom, gen_mom_res; //generalized momentum, and its residual
     std::map<std::string, hrp::dvector> accum_tau, accum_beta, accum_res, initial_gen_mom;
-    std::map<std::string, hrp::dvector> resist_dir_torque, relax_dir_torque; //collision torque for arbitrary direction
-    std::map<std::string, hrp::dvector> resist_of_one_step_before;
     std::map<std::string, int> collision_uncheck_count;
     std::map<std::string, std::string> collision_link;
     std::map<std::string, bool> collision_detector_initialized, gen_imat_initialized;
     std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
     std::vector<double> default_cgain, default_rgain;
 
-    //collision-param
+    // collision-param
     std::map<std::string, hrp::dmatrix> gen_mom_observer_gain, collision_resistance_gain;
     std::map<std::string, hrp::dvector> default_collision_threshold;
     int max_collision_uncheck_count;
     hrp::dvector actual_torque_vector;
-    //for debug log
-    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f, debug_resdir; //for collision detection debug
-    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew, debug_dq; //for opetaional space control debug
-    std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror;
-    std::map<std::string, std::ofstream*> debug_velest, debug_velact, debug_qest, debug_qact, debug_qref;
-    // ee vel&force estimation
-    std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench;
+
+    // for debug log
+    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f; //CollisionDetector
+    std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew; //calcEECompensation
+    std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror; //calcEECompensation
+    std::map<std::string, std::ofstream*> debug_dqest, debug_dqact, debug_qest, debug_qact, debug_qref; //estimateRefdq
+    std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench; //ee vel&force estimation
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational
 
-    //reference velocity estimation
+    // reference velocity estimation
     hrp::dvector overwritten_qRef_prev, estimated_reference_velocity, transition_velest, log_est_q, log_act_q, log_ref_q;
-    //IIR filter parameters (for velocity estimation)
+    // IIR filter parameters (for velocity estimation)
     double iir_cutoff_frequency, iir_alpha, iir_a0, iir_a1, iir_a2, iir_b1, iir_b2;
     std::map<std::string, hrp::dvector> velest_now, velest_prev, velest_prevprev, imp_now, imp_prev, imp_prevprev; //estimated joint velocities and velocity generated by impedance(ee compensation)
     std::map<std::string, bool> velest_initialized, overwrite_refangle;
@@ -266,7 +252,7 @@ private:
     void estimateEEVelForce();
     void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 
-    //disturbance observer
+    // disturbance observer
     std::map<std::string, hrp::Vector3> velocity_discrepancy, force_increase, prev_filtered_force;
     std::map<std::string, bool> dist_obs_initialized;
     std::map<std::string, std::ofstream*> debug_vel_discrepancy, debug_force_inc;

@@ -167,7 +167,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             return RTC::RTC_ERROR;
         }
     }
-    torque_output_type = CALC_TORQUE;
     // setting from conf file
     coil::vstring end_effectors_str = coil::split(prop["end_effectors"], ",");
     coil::vstring ltc_pgain_str = coil::split(prop["ltc_pgain"], ",");
@@ -193,7 +192,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             hrp::dvector one_gen_mom, one_old_gen_mom, one_gen_mom_res;
             hrp::dvector one_accum_tau, one_accum_beta, one_accum_res, one_initial_gen_mom;
             hrp::dvector one_collision_threshold;
-            hrp::dvector one_resist_of_one_step_before;
 
             coil::stringTo(ee_name, end_effectors_str[i*prop_num].c_str());
             coil::stringTo(ee_target, end_effectors_str[i*prop_num+1].c_str());
@@ -237,7 +235,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             collision_link.insert(std::pair<std::string, std::string>(ee_name, "no collision"));
             default_collision_threshold.insert(std::pair<std::string, hrp::dvector>(ee_name, one_collision_threshold));
             initial_gen_mom.insert(std::pair<std::string, hrp::dvector>(ee_name, one_initial_gen_mom));
-            resist_of_one_step_before.insert(std::pair<std::string, hrp::dvector>(ee_name, one_resist_of_one_step_before));
             std::cerr << "[" << m_profile.instance_name << "] End Effector [" << ee_name << "]" << ee_target << " " << ee_base << std::endl;
             std::cerr << "[" << m_profile.instance_name << "]   target = " << ee_target << ", base = " << ee_base << std::endl;
             std::cerr << "[" << m_profile.instance_name << "]   localPos = " << eet.localPos.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "    [", "]")) << "[m]" << std::endl;
@@ -332,15 +329,10 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         col_p.handle_mode = 0;
         col_p.max_collision_uncheck_count = 1000;
         m_lt_col_param[ee_name] = col_p;
-        hrp::dvector temp_dvec6 = hrp::dvector(6,1);
-        temp_dvec6 << 1.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        resist_direction[ee_name] = temp_dvec6;
         //for ee compensation
         hrp::dmatrix temp_jacobian(6, p.manip->numJoints()), temp_inv_j(p.manip->numJoints(), 6);
         act_ee_jacobian[ee_name] = temp_jacobian;
-        ref_ee_jacobian[ee_name] = temp_jacobian;
         inv_ee_jacobian[ee_name] = temp_inv_j;
-        inv_ee_jacobian_t[ee_name] = temp_jacobian;
         ee_pos_comp_force[ee_name] = hrp::Vector3::Zero();
         ee_ori_comp_moment[ee_name] = hrp::Vector3::Zero();
         ee_vel_comp_force[ee_name] = hrp::Vector3::Zero();
@@ -358,7 +350,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ref_ee_vel[ee_name] = hrp::Vector3::Zero();
         act_ee_w[ee_name] = hrp::Vector3::Zero();
         ref_ee_w[ee_name] = hrp::Vector3::Zero();
-        dq_for_each_arm[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         current_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
         current_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
         prev_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
@@ -405,9 +396,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         accum_beta[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
         accum_res[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
         initial_gen_mom[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
-        resist_of_one_step_before[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
-        resist_dir_torque[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
-        relax_dir_torque[ee_name] = hrp::dvector::Zero(param.manip->numJoints());
 
         ++it;
     }
@@ -561,23 +549,14 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
        calcForceMoment();
        getActualParameters(); //センサ値を変数にセット
 
-       if (torque_output_type == CALC_TORQUE) {
+       calcLimbInverseDynamics();
+       calcEECompensation();
+       calcNullJointDumping();
+       //estimateRefdq(); // to be tested more
+       estimateEEVelForce();
+       DisturbanceObserver();
 
-           calcLimbInverseDynamics();
-           //calcJointDumpingTorque(); //関節角度ダンピング
-           calcEECompensation();
-           calcNullJointDumping();
-           //calcMinMaxAvoidanceTorque(); //Null Spaceで考慮しているので使わない
-           //estimateRefVel(); // to be tested more
-           estimateEEVelForce();
-           DisturbanceObserver();
-       }
-       else if (torque_output_type == REF_TORQUE) {
-           addDumpingToRefTorque();
-       }
-
-       CollisionDetector();
-       CollisionHandler();
+       // CollisionDetector();
 
        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
            m_q.data[i] = m_robotRef->joint(i)->q;
@@ -632,10 +611,6 @@ void LimbTorqueController::getTargetParameters()
         //if 外から指令値in set 指令値 as dqRef & ddqRef
         qoldRef[i] = m_qRef.data[i];
         dqoldRef[i] = m_robotRef->joint(i)->dq;
-        if (torque_output_type == REF_TORQUE){
-            //m_robot->joint(i)->u = m_tqRef.data[i];
-            m_robot->joint(i)->u = 0; //temporary
-        }
     }
 #if 1 //for legged robot
     target_root_p = hrp::Vector3(m_basePos.data.x, m_basePos.data.y, m_basePos.data.z);
@@ -651,10 +626,10 @@ void LimbTorqueController::getTargetParameters()
     while(it != m_ref_lt_param.end()){
         std::string ee_name = it->first;
         LTParam& param = it->second;
-        if(param.is_active){
-            hrp::JointPathExPtr manip = param.manip;
-            manip->calcJacobian(ref_ee_jacobian[ee_name]);
-        }
+        // if(param.is_active){
+        //     hrp::JointPathExPtr manip = param.manip;
+        //     manip->calcJacobian(ref_ee_jacobian[ee_name]);
+        // }
         it++;
     }
 }
@@ -725,9 +700,7 @@ void LimbTorqueController::getActualParameters()
         m_robot->joint(i)->dq = m_dqCurrent.data[i];
         m_robot->joint(i)->ddq = m_robotRef->joint(i)->ddq; //TODO
         actual_torque_vector(i) = m_tqCurrent.data[i];
-        if (torque_output_type != REF_TORQUE){
-            m_robot->joint(i)->u = 0;
-        }
+        m_robot->joint(i)->u = 0;
         qold[i] = m_qCurrent.data[i];
     }
     m_robot->rootLink()->p = target_root_p;
@@ -825,61 +798,6 @@ void LimbTorqueController::calcLimbInverseDynamics()
     }
 }
 
-void LimbTorqueController::calcGravityCompensation()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            hrp::Vector3 tmp_f, tmp_tau;
-            //TODO: add sibling
-            hrp::Link* tmp_updating_joint = manip->endLink();
-            while (tmp_updating_joint->parent) {
-                tmp_updating_joint->wc = tmp_updating_joint->p + tmp_updating_joint->R*tmp_updating_joint->c; //position of CoM of the link
-                if (tmp_updating_joint->child) {
-                    tmp_updating_joint->subm = tmp_updating_joint->child->subm + tmp_updating_joint->m; //total mass of subtree
-                    tmp_updating_joint->submwc = tmp_updating_joint->m*tmp_updating_joint->wc + tmp_updating_joint->child->submwc; //total momentum of subtree around world origin
-                }else{
-                    tmp_updating_joint->subm = tmp_updating_joint->m;
-                    tmp_updating_joint->submwc = tmp_updating_joint->m*tmp_updating_joint->wc;
-                }
-                hrp::Vector3 world_joint_axis = tmp_updating_joint->R*tmp_updating_joint->a;
-                hrp::Vector3 local_moment_arm = tmp_updating_joint->submwc/tmp_updating_joint->subm - tmp_updating_joint->p;
-                tmp_updating_joint->u += tmp_updating_joint->subm*(local_moment_arm.cross(param.gravitational_acceleration)).dot(world_joint_axis);
-                tmp_updating_joint = tmp_updating_joint->parent;
-            }
-        }
-        ++it;
-    } //end while
-}
-
-void LimbTorqueController::calcJointDumpingTorque()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            std::string ee_name = it->first;
-            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
-                hrp::Link* act_joint = manip->joint(i);
-                hrp::Link* ref_joint = m_robotRef->joint(act_joint->jointId);
-                double q_error = act_joint->q - ref_joint->q;
-                double dq_error = act_joint->dq - ref_joint->dq;
-                act_joint->u += -m_lt_param[ee_name].pgain*q_error - m_lt_param[ee_name].dgain*dq_error;
-                //std::cout << "calcJointDumpingGain: act_joint(" << manip->joint(i)->name << ")=" << act_joint->dq << std::endl;
-            }}
-        ++it;
-    }
-}
-
 void LimbTorqueController::calcMinMaxAvoidanceTorque()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
@@ -911,27 +829,6 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
                 }
             }
         }
-        ++it;
-    }
-}
-
-//for REF_TORQUE mode
-void LimbTorqueController::addDumpingToRefTorque()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            std::string ee_name = it->first;
-            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
-                hrp::Link* act_joint = manip->joint(i);
-                // act_joint->u += - m_lt_param[ee_name].dgain * act_joint->dq;
-                act_joint->u = 0;
-            }}
         ++it;
     }
 }
@@ -999,17 +896,6 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         m_lt_param[name].ee_dgain_r = ee_dgain_vec.tail(3).asDiagonal();
         hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
         hrp::dmatrix concatenated_dgain = ee_dgain_vec.asDiagonal();  //just for print
-
-        //TODO: コントローラがACTIVEの時モード変更できないように制限
-        switch (i_param_.torque_output_type){
-        case OpenHRP::LimbTorqueControllerService::CALC_TORQUE:
-            torque_output_type = CALC_TORQUE;
-            break;
-        case OpenHRP::LimbTorqueControllerService::REF_TORQUE:
-            torque_output_type = REF_TORQUE;
-            break;
-        default: break;
-        }
 
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
@@ -1141,8 +1027,6 @@ bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHR
             i_param_->CollisionTorque[i] = 0;
         case 1:
             i_param_->CollisionTorque[i] = gen_mom_res[i_name_](i);
-        case 3:
-            i_param_->CollisionTorque[i] = resist_dir_torque[i_name_](i);
         }
     }
     if (collision_uncheck_count[i_name_] > 0){
@@ -1155,160 +1039,127 @@ bool LimbTorqueController::getCollisionStatus(const std::string& i_name_, OpenHR
     return true;
 }
 
-extern "C"
-{
-    void LimbTorqueControllerInit(RTC::Manager* manager)
-    {
-        RTC::Properties profile(limbtorquecontroller_spec);
-        manager->registerFactory(profile,
-                                 RTC::Create<LimbTorqueController>,
-                                 RTC::Delete<LimbTorqueController>);
-    }
-};
-
+//method E(Estimation of tau_ext via Momentum Observer) in S.Haddadin et al. "Robot Collisions: A Survey on Detection, Isolation, and Identification," TRO2017
 void LimbTorqueController::CollisionDetector()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
+        int dof = m_robot->numJoints();
+        hrp::dvector dq_backup(dof), ddq_backup(dof), tq_backup(dof);
+        for (unsigned int i=0; i<dof; ++i){
+            dq_backup[i] = m_robot->joint(i)->dq;
+            ddq_backup[i] = m_robot->joint(i)->ddq;
+            tq_backup[i] = m_robot->joint(i)->u;
+        }
         std::string ee_name = it->first;
-        CollisionParam& col_param = m_lt_col_param[ee_name];
-        switch (col_param.check_mode){
-        case 0:
-            break;
-        case 1:
-            CollisionDetector1(it);
-            break;
-        case 2:
-            CollisionDetector2(it);
-            break;
-        case 3:
-            CollisionDetector3(it);
-            break;
-        }
-        if(collision_uncheck_count[ee_name] > 0){
-            --collision_uncheck_count[ee_name];
-        }
-        ++it;
-    }
-}
-
-//method E(Estimation of tau_ext via Momentum Observer) in S.Haddadin et al. "Robot Collisions: A Survey on Detection, Isolation, and Identification," TRO2017
-void LimbTorqueController::CollisionDetector1(std::map<std::string, LTParam>::iterator it)
-{
-    int dof = m_robot->numJoints();
-    hrp::dvector dq_backup(dof), ddq_backup(dof), tq_backup(dof);
-    for (unsigned int i=0; i<dof; ++i){
-        dq_backup[i] = m_robot->joint(i)->dq;
-        ddq_backup[i] = m_robot->joint(i)->ddq;
-        tq_backup[i] = m_robot->joint(i)->u;
-    }
-    std::string ee_name = it->first;
-    LTParam& param = it->second;
-    if (param.is_active) {
-        if (DEBUGP) {
-            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-        }
-        calcGeneralizedInertiaMatrix(it);
-        hrp::JointPathExPtr manip = param.manip;
-        int limbdof = manip->numJoints();
-        hrp::Link* base_link = manip->baseLink();
-        hrp::dmatrix base_rot = base_link->R;
-        hrp::Vector3 out_f, out_tau;
-        out_f = hrp::Vector3::Zero(3);
-        out_tau = hrp::Vector3::Zero(3);
-        base_link->dvo = base_rot * param.gravitational_acceleration;
-        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-        for (unsigned int i=0; i<limbdof; ++i){
-            manip->joint(i)->ddq = 0.0;
-        }
-        hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
-        hrp::dmatrix  inertia_dot;
-        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-        for (unsigned int i=0; i<limbdof; ++i){
-            c_and_g(i) = manip->joint(i)->u;
-            q_dot(i) = dq_backup[manip->joint(i)->jointId];
-        }
-        hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
-        hrp::dmatrix time_matrix = time_vector.asDiagonal();
-        inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
-        beta = c_and_g - inertia_dot*q_dot;
-        for (unsigned int i=0; i<limbdof; ++i){
-            manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
-            manip->joint(i)->dq = 0.0;
-        }
-        base_link->dvo.setZero();
-        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-        out_f = hrp::Vector3::Zero(3);
-        out_tau = hrp::Vector3::Zero(3);
-        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-        for (unsigned int i=0; i<limbdof; ++i){
-            gen_mom[ee_name](i) = manip->joint(i)->u;
-            // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
-            //mot_tq(i) = tq_backup[manip->joint(i)->jointId];
-            // use sensor torque //probably correct for torque-controlled real robot?
-            mot_tq(i) = actual_torque_vector[manip->joint(i)->jointId];
-        }
-        if (!collision_detector_initialized[ee_name]){
-            //old_gen_mom[ee_name] = gen_mom[ee_name];
-            initial_gen_mom[ee_name] = gen_mom[ee_name];
-            collision_detector_initialized[ee_name] = true;
-        }
-
-        accum_tau[ee_name] += mot_tq*RTC_PERIOD;
-        // if(collision_uncheck_count[ee_name] > 0){
-        //     accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
-        // }
-
-        accum_beta[ee_name] += beta*RTC_PERIOD;
-        accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
-        //calc residual (need filter?)
-        gen_mom_res[ee_name]
-            = gen_mom_observer_gain[ee_name]
-            * (gen_mom[ee_name] - initial_gen_mom[ee_name]
-               - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
-               );
-
-        for (int i=limbdof-1; i>=0; --i) {
-            if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
-                collision_link[ee_name] = manip->joint(i)->name;
-                std::cout << std::endl;
-                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
-                std::cout << std::endl;
-                break;
+        LTParam& param = it->second;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
             }
+            calcGeneralizedInertiaMatrix(it);
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            hrp::Link* base_link = manip->baseLink();
+            hrp::dmatrix base_rot = base_link->R;
+            hrp::Vector3 out_f, out_tau;
+            out_f = hrp::Vector3::Zero(3);
+            out_tau = hrp::Vector3::Zero(3);
+            base_link->dvo = base_rot * param.gravitational_acceleration;
+            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+            for (unsigned int i=0; i<limbdof; ++i){
+                manip->joint(i)->ddq = 0.0;
+            }
+            hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
+            hrp::dmatrix  inertia_dot;
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+            for (unsigned int i=0; i<limbdof; ++i){
+                c_and_g(i) = manip->joint(i)->u;
+                q_dot(i) = dq_backup[manip->joint(i)->jointId];
+            }
+            hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
+            hrp::dmatrix time_matrix = time_vector.asDiagonal();
+            inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
+            beta = c_and_g - inertia_dot*q_dot;
+            for (unsigned int i=0; i<limbdof; ++i){
+                manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
+                manip->joint(i)->dq = 0.0;
+            }
+            base_link->dvo.setZero();
+            base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
+            out_f = hrp::Vector3::Zero(3);
+            out_tau = hrp::Vector3::Zero(3);
+            m_robot->calcInverseDynamics(base_link, out_f, out_tau);
+            for (unsigned int i=0; i<limbdof; ++i){
+                gen_mom[ee_name](i) = manip->joint(i)->u;
+                // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
+                //mot_tq(i) = tq_backup[manip->joint(i)->jointId];
+                // use sensor torque //probably correct for torque-controlled real robot?
+                mot_tq(i) = actual_torque_vector[manip->joint(i)->jointId];
+            }
+            if (!collision_detector_initialized[ee_name]){
+                //old_gen_mom[ee_name] = gen_mom[ee_name];
+                initial_gen_mom[ee_name] = gen_mom[ee_name];
+                collision_detector_initialized[ee_name] = true;
+            }
+
+            accum_tau[ee_name] += mot_tq*RTC_PERIOD;
+
+            accum_beta[ee_name] += beta*RTC_PERIOD;
+            accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
+            //calc residual
+            gen_mom_res[ee_name]
+                = gen_mom_observer_gain[ee_name]
+                * (gen_mom[ee_name] - initial_gen_mom[ee_name]
+                   - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
+                   );
+
+            for (int i=limbdof-1; i>=0; --i) {
+                if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
+                    collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
+                    collision_link[ee_name] = manip->joint(i)->name;
+                    std::cout << std::endl;
+                    std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
+                    std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
+                    std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
+                    std::cout << std::endl;
+                    break;
+                }
+            }
+            if (collision_uncheck_count[ee_name] == 0){
+                collision_uncheck_count[ee_name]--;
+            }
+            // if (loop%100 == 0){
+            //     // if (loop%1000==0){
+            //     //     std::cout << "CollisionDetector: residual is ... "  << std::endl << gen_mom_res[ee_name] << std::endl;
+            //     // }
+            //     struct timeval nowtime;
+            //     gettimeofday(&nowtime, NULL);
+            //     debugmom << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugtau << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugbet << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugares << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     debugres << nowtime.tv_sec << "." << nowtime.tv_usec;
+            //     for (unsigned int i=0; i<limbdof; ++i){
+            //         debugmom << " " << gen_mom[ee_name](i);
+            //         debugtau << " " << accum_tau[ee_name](i);
+            //         debugbet << " " << accum_res[ee_name](i);
+            //         debugares << " " << accum_res[ee_name](i);
+            //         debugres << " " << gen_mom_res[ee_name](i);
+            //     }
+            //     debugmom << std::endl;
+            //     debugtau << std::endl;
+            //     debugbet << std::endl;
+            //     debugares << std::endl;
+            //     debugres << std::endl;
+            // }
         }
-        // if (loop%100 == 0){
-        //     // if (loop%1000==0){
-        //     //     std::cout << "CollisionDetector: residual is ... "  << std::endl << gen_mom_res[ee_name] << std::endl;
-        //     // }
-        //     struct timeval nowtime;
-        //     gettimeofday(&nowtime, NULL);
-        //     debugmom << nowtime.tv_sec << "." << nowtime.tv_usec;
-        //     debugtau << nowtime.tv_sec << "." << nowtime.tv_usec;
-        //     debugbet << nowtime.tv_sec << "." << nowtime.tv_usec;
-        //     debugares << nowtime.tv_sec << "." << nowtime.tv_usec;
-        //     debugres << nowtime.tv_sec << "." << nowtime.tv_usec;
-        //     for (unsigned int i=0; i<limbdof; ++i){
-        //         debugmom << " " << gen_mom[ee_name](i);
-        //         debugtau << " " << accum_tau[ee_name](i);
-        //         debugbet << " " << accum_res[ee_name](i);
-        //         debugares << " " << accum_res[ee_name](i);
-        //         debugres << " " << gen_mom_res[ee_name](i);
-        //     }
-        //     debugmom << std::endl;
-        //     debugtau << std::endl;
-        //     debugbet << std::endl;
-        //     debugares << std::endl;
-        //     debugres << std::endl;
-        // }
-    }
-    for (unsigned int i=0; i<dof; ++i){
-        m_robot->joint(i)->dq = dq_backup[i];
-        m_robot->joint(i)->ddq = ddq_backup[i];
-        m_robot->joint(i)->u = tq_backup[i];
+        for (unsigned int i=0; i<dof; ++i){
+            m_robot->joint(i)->dq = dq_backup[i];
+            m_robot->joint(i)->ddq = ddq_backup[i];
+            m_robot->joint(i)->u = tq_backup[i];
+        }
+        it++;
     }
 }
 
@@ -1344,40 +1195,6 @@ void LimbTorqueController::calcGeneralizedInertiaMatrix(std::map<std::string, LT
     }
 }
 
-void LimbTorqueController::CollisionHandler()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        std::string ee_name = it->first;
-        CollisionParam& col_param = m_lt_col_param[ee_name];
-        switch (col_param.handle_mode){
-        case 0:
-            break;
-            //TODO: case 1
-        case 2: //resist collision
-            LTParam& ltc_param = it->second;
-            hrp::JointPathExPtr manip = ltc_param.manip;
-            if (ltc_param.is_active) {
-                if (DEBUGP) {
-                    std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-                }
-                if(collision_uncheck_count[ee_name] > 0){
-                    hrp::dvector collision_resistance_torque = - collision_resistance_gain[ee_name] * gen_mom_res[ee_name];
-                    for (int i=0; i<manip->numJoints(); ++i){
-                        manip->joint(i)->u += collision_resistance_torque(i);
-                    }
-                    resist_of_one_step_before[ee_name] = collision_resistance_torque;
-                }
-                if(collision_uncheck_count[ee_name] == 0){
-                    resist_of_one_step_before[ee_name] = hrp::dvector::Zero(manip->numJoints());
-                }
-            }
-            break;
-        }
-        it++;
-    }
-}
-
 void LimbTorqueController::DebugOutput()
 {
     if (loop%3 == 0){
@@ -1400,9 +1217,6 @@ void LimbTorqueController::DebugOutput()
                     *(debug_res[ee_name]) << micro_time;
                     *(debug_reftq[ee_name]) << micro_time;
                     *(debug_f[ee_name]) << micro_time;
-                    if(col_param.check_mode == 3){
-                        *(debug_resdir[ee_name]) << micro_time;
-                    }
                 }
                 else if(log_type == 2){
                     *(debug_ee_pocw[ee_name]) << micro_time;
@@ -1418,9 +1232,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_refeevel[ee_name]) << micro_time;
                     *(debug_acteew[ee_name]) << micro_time;
                     *(debug_refeew[ee_name]) << micro_time;
-                    *(debug_dq[ee_name]) << micro_time;
-                    *(debug_velest[ee_name]) << micro_time;
-                    *(debug_velact[ee_name]) << micro_time;
+                    *(debug_dqest[ee_name]) << micro_time;
+                    *(debug_dqact[ee_name]) << micro_time;
                     *(debug_qest[ee_name]) << micro_time;
                     *(debug_qact[ee_name]) << micro_time;
                     *(debug_qref[ee_name]) << micro_time;
@@ -1444,9 +1257,6 @@ void LimbTorqueController::DebugOutput()
                         *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
                         *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
                         *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
-                        if(col_param.check_mode == 3){
-                            *(debug_resdir[ee_name]) << " " << resist_dir_torque[ee_name](i);
-                        }
                     }
                     for (unsigned int i=0; i<6; ++i){
                         *(debug_f[ee_name]) << " " << external_force(i);
@@ -1458,9 +1268,6 @@ void LimbTorqueController::DebugOutput()
                     *(debug_res[ee_name]) << std::endl;
                     *(debug_reftq[ee_name]) << std::endl;
                     *(debug_f[ee_name]) << std::endl;
-                    if(col_param.check_mode == 3){
-                        *(debug_resdir[ee_name]) << std::endl;
-                    }
                 }
                 else if(log_type == 2){
                     for (int i=0; i<3; i++){
@@ -1493,9 +1300,8 @@ void LimbTorqueController::DebugOutput()
                         *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
                         *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
                         *(debug_reftq[ee_name]) << " " << manip->joint(i)->u;
-                        *(debug_dq[ee_name]) << " " << dq_for_each_arm[ee_name](i);
-                        *(debug_velest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
-                        *(debug_velact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
+                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
+                        *(debug_dqact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
                         *(debug_qest[ee_name]) << " " << log_est_q(manip->joint(i)->jointId);
                         *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
                         *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
@@ -1513,9 +1319,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_refeevel[ee_name]) << std::endl;
                     *(debug_acteew[ee_name]) << std::endl;
                     *(debug_refeew[ee_name]) << std::endl;
-                    *(debug_dq[ee_name]) << std::endl;
-                    *(debug_velest[ee_name]) << std::endl;
-                    *(debug_velact[ee_name]) << std::endl;
+                    *(debug_dqest[ee_name]) << std::endl;
+                    *(debug_dqact[ee_name]) << std::endl;
                     *(debug_qest[ee_name]) << std::endl;
                     *(debug_qact[ee_name]) << std::endl;
                     *(debug_qref[ee_name]) << std::endl;
@@ -1528,35 +1333,6 @@ void LimbTorqueController::DebugOutput()
                 }
             }
             it++;
-        }
-    }
-}
-
-//simple, rough collision detection method based on measured torque
-void LimbTorqueController::CollisionDetector2(std::map<std::string, LTParam>::iterator it)
-{
-    std::string ee_name = it->first;
-    LTParam& param = it->second;
-    if (param.is_active) {
-        if (DEBUGP) {
-            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-        }
-        hrp::JointPathExPtr manip = param.manip;
-        int limbdof = manip->numJoints();
-        hrp::dvector mot_tq(limbdof);
-        for (unsigned int i=0; i<limbdof; ++i){
-            mot_tq(i) = manip->joint(i)->u;
-        }
-        gen_mom_res[ee_name] = mot_tq - actual_torque_vector;
-        for (int i=limbdof-1; i>=0; --i) {
-            if( (std::abs(gen_mom_res[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
-                collision_link[ee_name] = manip->joint(i)->name;
-                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                std::cout << "now    = " << gen_mom_res[ee_name].transpose() << std::endl;
-                break;
-            }
         }
     }
 }
@@ -1585,7 +1361,6 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_res[ee_name] = new std::ofstream((logpath +std::string("res.dat")).c_str());
                 debug_reftq[ee_name] = new std::ofstream((logpath + std::string("ref_tq.dat")).c_str());
                 debug_f[ee_name] = new std::ofstream((logpath + std::string("ext_f.dat")).c_str());
-                debug_resdir[ee_name] = new std::ofstream((logpath + std::string("resdir.dat")).c_str());
                 log_type = 1;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for collision detection!!" << std::endl;
@@ -1604,9 +1379,8 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_refeevel[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_vel.dat")).c_str());
                 debug_acteew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_w.dat")).c_str());
                 debug_refeew[ee_name] = new std::ofstream((logpath  + std::string("ref_ee_w.dat")).c_str());
-                debug_dq[ee_name] = new std::ofstream((logpath  + std::string("dq.dat")).c_str());
-                debug_velest[ee_name] = new std::ofstream((logpath  + std::string("velest.dat")).c_str());
-                debug_velact[ee_name] = new std::ofstream((logpath  + std::string("velact.dat")).c_str());
+                debug_dqest[ee_name] = new std::ofstream((logpath  + std::string("est_dq.dat")).c_str());
+                debug_dqact[ee_name] = new std::ofstream((logpath  + std::string("act_dq.dat")).c_str());
                 debug_qest[ee_name] = new std::ofstream((logpath  + std::string("qest.dat")).c_str());
                 debug_qact[ee_name] = new std::ofstream((logpath  + std::string("qact.dat")).c_str());
                 debug_qref[ee_name] = new std::ofstream((logpath  + std::string("qref.dat")).c_str());
@@ -1648,7 +1422,6 @@ bool LimbTorqueController::stopLog()
                 delete debug_res[ee_name];
                 delete debug_reftq[ee_name];
                 delete debug_f[ee_name];
-                delete debug_resdir[ee_name];
             }
             else if(log_type == 2){
                 delete debug_ee_pocw[ee_name];
@@ -1664,9 +1437,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_refeevel[ee_name];
                 delete debug_acteew[ee_name];
                 delete debug_refeew[ee_name];
-                delete debug_dq[ee_name];
-                delete debug_velest[ee_name];
-                delete debug_velact[ee_name];
+                delete debug_dqest[ee_name];
+                delete debug_dqact[ee_name];
                 delete debug_qest[ee_name];
                 delete debug_qact[ee_name];
                 delete debug_qref[ee_name];
@@ -1682,123 +1454,6 @@ bool LimbTorqueController::stopLog()
     }
     std::cout << "[ltc] successfully stop log!!" << std::endl;
     return true;
-}
-
-//modification of generalized momentum method, including direction filtering
-void LimbTorqueController::CollisionDetector3(std::map<std::string, LTParam>::iterator it)
-{
-    int dof = m_robot->numJoints();
-    hrp::dvector dq_backup(dof), ddq_backup(dof), tq_backup(dof);
-    for (unsigned int i=0; i<dof; ++i){
-        dq_backup[i] = m_robot->joint(i)->dq;
-        ddq_backup[i] = m_robot->joint(i)->ddq;
-        tq_backup[i] = m_robot->joint(i)->u;
-    }
-    std::string ee_name = it->first;
-    LTParam& param = it->second;
-    if (param.is_active) {
-        if (DEBUGP) {
-            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-        }
-        calcGeneralizedInertiaMatrix(it);
-        hrp::JointPathExPtr manip = param.manip;
-        int limbdof = manip->numJoints();
-        hrp::Link* base_link = manip->baseLink();
-        hrp::dmatrix base_rot = base_link->R;
-        hrp::Vector3 out_f, out_tau;
-        out_f = hrp::Vector3::Zero(3);
-        out_tau = hrp::Vector3::Zero(3);
-        base_link->dvo = base_rot * param.gravitational_acceleration;
-        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-        for (unsigned int i=0; i<limbdof; ++i){
-            manip->joint(i)->ddq = 0.0;
-        }
-        hrp::dvector c_and_g(limbdof), q_dot(limbdof), beta(limbdof), mot_tq(limbdof);
-        hrp::dmatrix  inertia_dot;
-        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-        for (unsigned int i=0; i<limbdof; ++i){
-            c_and_g(i) = manip->joint(i)->u;
-            q_dot(i) = dq_backup[manip->joint(i)->jointId];
-        }
-        hrp::dvector time_vector = hrp::dvector::Constant(limbdof, 1.0/RTC_PERIOD);
-        hrp::dmatrix time_matrix = time_vector.asDiagonal();
-        inertia_dot = time_matrix * (gen_imat[ee_name] - old_gen_imat[ee_name]);
-        beta = c_and_g - inertia_dot*q_dot;
-        for (unsigned int i=0; i<limbdof; ++i){
-            manip->joint(i)->ddq = dq_backup[manip->joint(i)->jointId];
-            manip->joint(i)->dq = 0.0;
-        }
-        base_link->dvo.setZero();
-        base_link->dw.setZero();  //assuming base_link is fixed! should be modified for humanoid
-        out_f = hrp::Vector3::Zero(3);
-        out_tau = hrp::Vector3::Zero(3);
-        m_robot->calcInverseDynamics(base_link, out_f, out_tau);
-        for (unsigned int i=0; i<limbdof; ++i){
-            gen_mom[ee_name](i) = manip->joint(i)->u;
-            // use command torque //seems good for simulation(choreonoid), which does not simulate joint friction
-            mot_tq(i) = tq_backup[manip->joint(i)->jointId];
-            // use sensor torque //probably correct for torque-controlled real robot?
-            mot_tq(i) = actual_torque_vector[manip->joint(i)->jointId];
-        }
-        if (!collision_detector_initialized[ee_name]){
-            //old_gen_mom[ee_name] = gen_mom[ee_name];
-            initial_gen_mom[ee_name] = gen_mom[ee_name];
-            collision_detector_initialized[ee_name] = true;
-        }
-
-        accum_tau[ee_name] += mot_tq*RTC_PERIOD;
-        // if(collision_uncheck_count[ee_name] > 0){
-        //     accum_tau[ee_name] += resist_of_one_step_before[ee_name]*RTC_PERIOD;
-        // }
-
-        accum_beta[ee_name] += beta*RTC_PERIOD;
-        accum_res[ee_name] += gen_mom_res[ee_name]*RTC_PERIOD;
-        //calc residual (need filter?)
-        gen_mom_res[ee_name]
-            = gen_mom_observer_gain[ee_name]
-            * (gen_mom[ee_name] - initial_gen_mom[ee_name]
-               - (accum_tau[ee_name]-accum_beta[ee_name]+accum_res[ee_name])
-               );
-
-        //reduce residual to just one direction
-        hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_ee_jacobian_t[ee_name]);
-        hrp::dvector external_force(6,1);
-        hrp::Link* temp_ee_target = m_robot->link(param.target_name);
-        hrp::Matrix33 temp_ee_rot = temp_ee_target->R * ee_map[ee_name].localR;
-        hrp::dmatrix temp_ee_rot_double(6,6); //for transforming both translation and rotation at a time
-        temp_ee_rot_double
-            << temp_ee_rot, hrp::Matrix33::Zero(),
-            hrp::Matrix33::Zero(), hrp::Matrix33::Zero();
-        //std::cout << temp_ee_rot_double << std::endl;
-        hrp::dvector world_resist_direction = temp_ee_rot_double * resist_direction[ee_name];
-        //std::cout << "resist direction for " << ee_name << " is " << world_resist_direction.transpose() << std::endl;
-        external_force = temp_ee_rot_double.transpose() * inv_ee_jacobian_t[ee_name]*gen_mom_res[ee_name]; //in end-effector local frame
-        resist_dir_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (world_resist_direction.dot(inv_ee_jacobian_t[ee_name]*gen_mom_res[ee_name]) * world_resist_direction);
-        // if(loop%300==0){
-        //     std::cout << std::endl;
-        //     std::cout << "[CollisionDetector] external force for " << ee_name << " is: " << external_force.transpose() << std::endl;
-        //     std::cout << std::endl;
-        // }
-
-        for (int i=limbdof-1; i>=0; --i) {
-            if( (std::abs(resist_dir_torque[ee_name][i]) > m_lt_col_param[ee_name].collision_threshold[i]) && (collision_uncheck_count[ee_name] == 0) ){
-                collision_uncheck_count[ee_name] = m_lt_col_param[ee_name].max_collision_uncheck_count;
-                collision_link[ee_name] = manip->joint(i)->name;
-                std::cout << std::endl;
-                std::cout << "[LimbTorqueController] Collision Detected at " << ee_name << " joint " << i << std::endl;
-                std::cout << "thresh = " << m_lt_col_param[ee_name].collision_threshold.transpose() << std::endl;
-                std::cout << "now    = " << resist_dir_torque[ee_name].transpose() << std::endl;
-                std::cout << "corresponding external force = " << external_force.transpose() << std::endl;
-                std::cout << std::endl;
-                break;
-            }
-        }
-    }
-    for (unsigned int i=0; i<dof; ++i){
-        m_robot->joint(i)->dq = dq_backup[i];
-        m_robot->joint(i)->ddq = ddq_backup[i];
-        m_robot->joint(i)->u = tq_backup[i];
-    }
 }
 
 void LimbTorqueController::calcEECompensation()
@@ -1926,7 +1581,6 @@ void LimbTorqueController::calcNullJointDumping()
             for (int i=0; i<limb_dof; i++) {
                 q_error(i) = ref_manip->joint(i)->q - manip->joint(i)->q;
                 dq_error(i) = ref_manip->joint(i)->dq - manip->joint(i)->dq;
-                dq_for_each_arm[ee_name][i] = manip->joint(i)->dq; //for debug log
             }
             hrp::dmatrix Jnull(limb_dof, limb_dof);
             manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], inv_ee_jacobian[ee_name], Jnull); // including min/max avoidance
@@ -1944,7 +1598,7 @@ void LimbTorqueController::calcNullJointDumping()
 }
 
 // Estimate Reference Velocity
-void LimbTorqueController::estimateRefVel()
+void LimbTorqueController::estimateRefdq()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
@@ -2026,7 +1680,7 @@ void LimbTorqueController::estimateRefVel()
 
 // start overwriting qRef with qRef+estimated_ref_vel * dt
 // do not call during position control
-bool LimbTorqueController::startRefVelEstimation(const std::string& i_name_)
+bool LimbTorqueController::startRefdqEstimation(const std::string& i_name_)
 {
     Guard guard(m_mutex);
     std::string name = std::string(i_name_);
@@ -2040,7 +1694,7 @@ bool LimbTorqueController::startRefVelEstimation(const std::string& i_name_)
 }
 
 // stop overwriting qRef, using transition. do not use normally?
-bool LimbTorqueController::stopRefVelEstimation(const std::string& i_name_)
+bool LimbTorqueController::stopRefdqEstimation(const std::string& i_name_)
 {
     Guard guard(m_mutex);
     std::string name = std::string(i_name_);
@@ -2193,3 +1847,14 @@ void LimbTorqueController::DisturbanceObserver()
         it++;
     }
 }
+
+extern "C"
+{
+    void LimbTorqueControllerInit(RTC::Manager* manager)
+    {
+        RTC::Properties profile(limbtorquecontroller_spec);
+        manager->registerFactory(profile,
+                                 RTC::Create<LimbTorqueController>,
+                                 RTC::Delete<LimbTorqueController>);
+    }
+};

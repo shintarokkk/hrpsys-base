@@ -24,15 +24,6 @@ module OpenHRP
     };
 
     /**
-     * @enum TorqueOutputType
-     * @brief Mode of calculation of torque
-     */
-    enum TorqueOutputType {
-        CALC_TORQUE,
-        REF_TORQUE
-    };
-
-    /**
      * @struct limbtorqueParam
      * @brief Limb torque controller parameters for one end-effector.
      */
@@ -40,7 +31,6 @@ module OpenHRP
         double Pgain;
         double Dgain;
         ControllerMode controller_mode;
-        TorqueOutputType torque_output_type;
         DblSequence ee_pgain;
         DblSequence ee_dgain;
     };
@@ -150,13 +140,13 @@ module OpenHRP
      * @param name: end effector
      * @return true if got successfully, false otherwise
      */
-    boolean startRefVelEstimation(in string name);
+    boolean startRefdqEstimation(in string name);
 
     /**
      * @brief stop overwriting reference joint angles using estimated reference velocity
      * @param name: end effector
      * @return true if got successfully, false otherwise
      */
-    boolean stopRefVelEstimation(in string name);
+    boolean stopRefdqEstimation(in string name);
   };
 };

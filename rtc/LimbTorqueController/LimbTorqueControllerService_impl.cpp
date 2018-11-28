@@ -64,14 +64,14 @@ CORBA::Boolean LimbTorqueControllerService_impl::stopLog()
   return m_limbtorque->stopLog();
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::startRefVelEstimation(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::startRefdqEstimation(const char *i_name_)
 {
-  return m_limbtorque->startRefVelEstimation(std::string(i_name_));
+  return m_limbtorque->startRefdqEstimation(std::string(i_name_));
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::stopRefVelEstimation(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::stopRefdqEstimation(const char *i_name_)
 {
-  return m_limbtorque->stopRefVelEstimation(std::string(i_name_));
+  return m_limbtorque->stopRefdqEstimation(std::string(i_name_));
 }
 
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)

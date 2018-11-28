@@ -103,6 +103,9 @@ public:
     bool stopLog();
     bool startRefdqEstimation(const std::string& i_name_);
     bool stopRefdqEstimation(const std::string& i_name_);
+    // test for reference torque regulator
+    bool startLTCEmergency(const std::string& i_name_);
+    bool stopLTCEmergency(const std::string& i_name_);
 
 protected:
 
@@ -166,7 +169,7 @@ private:
     void calcForceMoment();
     void getActualParameters();
     void calcLimbInverseDynamics();
-    void calcMinMaxAvoidanceTorque();
+    void calcMinMaxAvoidanceTorque();// Do not use this for now: it is not compatible with reference torque regulator for now
     void calcEECompensation();
     void calcNullJointDumping();
     void estimateRefdq();
@@ -184,6 +187,7 @@ private:
     std::map<std::string, hrp::Vector3> ee_pos_error, ee_ori_error;
     std::map<std::string, hrp::Matrix33> current_act_ee_rot, current_ref_ee_rot, prev_ref_ee_rot;
     std::map<std::string, hrp::Vector3> current_act_ee_pos, current_ref_ee_pos, prev_ref_ee_pos;
+    std::map<std::string, hrp::dquaternion> current_act_ee_ori, current_ref_ee_ori;
     std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel, act_ee_w, ref_ee_w;
     std::map<std::string, hrp::Vector3> ee_vel_error, ee_w_error;
     std::map<std::string, RMSfilter<hrp::Vector3> > ee_vel_filter;
@@ -203,8 +207,6 @@ private:
     int dummy;
     unsigned int loop;
     std::vector<double> default_pgain, default_dgain;
-    std::vector<double> temp_ref_vel, temp_ref_acc, temp_vel, temp_acc, temp_ref_u, temp_u; //for calcLimbInverseDynamics
-    std::vector<double> temp_invdyn_result;
 
     void CollisionDetector();
     void calcGeneralizedInertiaMatrix(std::map<std::string, LTParam>::iterator it);
@@ -256,7 +258,19 @@ private:
     std::map<std::string, hrp::Vector3> velocity_discrepancy, force_increase, prev_filtered_force;
     std::map<std::string, bool> dist_obs_initialized;
     std::map<std::string, std::ofstream*> debug_vel_discrepancy, debug_force_inc;
+    std::map<std::string, bool> disturbance_detected;
     void DisturbanceObserver();
+
+    // reference torque regulator
+    hrp::dvector invdyn_accvel_tq, invdyn_grav_tq, eecomp_tq, nullspace_tq;
+    hrp::dvector reference_torque;
+    std::map<std::string, bool> reftqregulator_initialized;
+    std::map<std::string, int> disturbance_uncheck_count;
+    int max_disturbance_uncheck_count;
+    std::map<std::string, hrp::Vector3> reaction_eepos, reaction_eevel, reaction_eew;
+    std::map<std::string, hrp::dquaternion> reaction_eeori;
+    void RefTorqueRegulator();
+    void RecalcEECompensation(const std::map<std::string, LTParam>::iterator it, const hrp::Vector3 _ref_ee_pos, const hrp::dquaternion _ref_ee_ori, const hrp::Vector3 _ref_ee_vel, const hrp::Vector3 _ref_ee_w);
 };
 
 extern "C"

@@ -74,6 +74,16 @@ CORBA::Boolean LimbTorqueControllerService_impl::stopRefdqEstimation(const char 
   return m_limbtorque->stopRefdqEstimation(std::string(i_name_));
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::startLTCEmergency(const char *i_name_)
+{
+  return m_limbtorque->startLTCEmergency(std::string(i_name_));
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::stopLTCEmergency(const char *i_name_)
+{
+  return m_limbtorque->stopLTCEmergency(std::string(i_name_));
+}
+
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)
 {
   m_limbtorque = i_limbtorque;

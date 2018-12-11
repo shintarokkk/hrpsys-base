@@ -36,10 +36,12 @@ public:
   CORBA::Boolean stopLog();
   CORBA::Boolean startRefdqEstimation(const char *i_name_);
   CORBA::Boolean stopRefdqEstimation(const char *i_name_);
-  CORBA::Boolean startDisturbanceObserver(const char *i_name_);
-  CORBA::Boolean stopDisturbanceObserver(const char *i_name_);
-  CORBA::Boolean startLTCEmergency(const char *i_name_);
-  CORBA::Boolean stopLTCEmergency(const char *i_name_);
+    CORBA::Boolean releaseEmergency(const char *i_name_, CORBA::Boolean cancel);
+  CORBA::Boolean giveTaskDescription(const char *i_name_, const OpenHRP::LimbTorqueControllerService::taskDescription &i_taskd_);
+  CORBA::Boolean getTaskDescription(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_);
+  CORBA::Boolean getTaskState(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_);
+    CORBA::Boolean startModeChange(const char *i_name_);
+    CORBA::Boolean stopModeChange(const char *i_name_);
 
   //
   void limbtorque(LimbTorqueController *i_limbtorque);

@@ -74,28 +74,37 @@ CORBA::Boolean LimbTorqueControllerService_impl::stopRefdqEstimation(const char 
   return m_limbtorque->stopRefdqEstimation(std::string(i_name_));
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::startDisturbanceObserver(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::releaseEmergency(const char *i_name_, CORBA::Boolean cancel)
 {
-  return m_limbtorque->startDisturbanceObserver(std::string(i_name_));
+    return m_limbtorque->releaseEmergency(std::string(i_name_), cancel);
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::stopDisturbanceObserver(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::giveTaskDescription(const char *i_name_, const OpenHRP::LimbTorqueControllerService::taskDescription &i_taskd_)
 {
-  return m_limbtorque->stopDisturbanceObserver(std::string(i_name_));
+    return m_limbtorque->giveTaskDescription(std::string(i_name_), i_taskd_);
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::startLTCEmergency(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::getTaskDescription(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_)
 {
-  return m_limbtorque->startLTCEmergency(std::string(i_name_));
+    return m_limbtorque->getTaskDescription(std::string(i_name_), i_taskd_);
 }
 
-CORBA::Boolean LimbTorqueControllerService_impl::stopLTCEmergency(const char *i_name_)
+CORBA::Boolean LimbTorqueControllerService_impl::getTaskState(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_)
 {
-  return m_limbtorque->stopLTCEmergency(std::string(i_name_));
+    return m_limbtorque->getTaskState(std::string(i_name_), i_tasks_);
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::startModeChange(const char *i_name_)
+{
+    return m_limbtorque->startModeChange(std::string(i_name_));
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::stopModeChange(const char *i_name_)
+{
+    return m_limbtorque->stopModeChange(std::string(i_name_));
 }
 
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)
 {
   m_limbtorque = i_limbtorque;
 }
-

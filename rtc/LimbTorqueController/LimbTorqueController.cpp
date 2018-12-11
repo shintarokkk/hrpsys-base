@@ -122,8 +122,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     if (!loadBodyFromModelLoader(m_robot, prop["model"].c_str(),
                                  CosNaming::NamingContext::_duplicate(naming.getRootContext())
                                  )){
-      std::cerr << "[" << m_profile.instance_name << "] failed to load model[" << prop["model"] << "]" << std::endl;
-      return RTC::RTC_ERROR;
+        std::cerr << "[" << m_profile.instance_name << "] failed to load model[" << prop["model"] << "]" << std::endl;
+        return RTC::RTC_ERROR;
     }
     loadBodyFromModelLoader(m_robotRef, prop["model"].c_str(),
                             CosNaming::NamingContext::_duplicate(naming.getRootContext()));
@@ -157,8 +157,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     }
 
     for (unsigned int i=0; i<m_forceIn.size(); i++){
-      abs_forces.insert(std::pair<std::string, hrp::Vector3>(m_forceIn[i]->name(), hrp::Vector3::Zero()));
-      abs_moments.insert(std::pair<std::string, hrp::Vector3>(m_forceIn[i]->name(), hrp::Vector3::Zero()));
+        abs_forces.insert(std::pair<std::string, hrp::Vector3>(m_forceIn[i]->name(), hrp::Vector3::Zero()));
+        abs_moments.insert(std::pair<std::string, hrp::Vector3>(m_forceIn[i]->name(), hrp::Vector3::Zero()));
     }
     unsigned int dof = m_robot->numJoints();
     for ( unsigned int i = 0 ; i < dof; i++ ){
@@ -297,6 +297,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         }
 
         // 4. Set limb torque param
+        p.is_active = false;
         p.sensor_name = sensor_name;
         p_ref.sensor_name = sensor_name;
         p.ee_name = ee_name;
@@ -306,6 +307,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p.dgain = default_dgain[0];  p_ref.dgain = default_dgain[0];
         p.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665); //TODO: set from outside
         p_ref.gravitational_acceleration = hrp::Vector3(0.0, 0.0, 9.80665);
+        p.amode = IDLE_NORMAL;
         hrp::Vector3 ee_pgainp_vec, ee_pgainr_vec, ee_dgainp_vec, ee_dgainr_vec;
         for (int i=0; i<3; i++){
             coil::stringTo(ee_pgainp_vec(i), ltc_eepgain_str[i].c_str());
@@ -330,9 +332,9 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         col_p.max_collision_uncheck_count = 1000;
         m_lt_col_param[ee_name] = col_p;
         //for ee compensation
-        hrp::dmatrix temp_jacobian(6, p.manip->numJoints()), temp_inv_j(p.manip->numJoints(), 6);
-        act_ee_jacobian[ee_name] = temp_jacobian;
-        inv_ee_jacobian[ee_name] = temp_inv_j;
+        act_ee_jacobian[ee_name].resize(6, p.manip->numJoints());
+        inv_act_ee_jacobian[ee_name].resize(p.manip->numJoints(), 6);
+        null_act_ee_jacobian[ee_name].resize(p.manip->numJoints(), p.manip->numJoints());
         ee_pos_comp_force[ee_name] = hrp::Vector3::Zero();
         ee_ori_comp_moment[ee_name] = hrp::Vector3::Zero();
         ee_vel_comp_force[ee_name] = hrp::Vector3::Zero();
@@ -343,23 +345,25 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         null_space_torque[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         ee_pos_error[ee_name] = hrp::Vector3::Zero();
         ee_ori_error[ee_name] = hrp::Vector3::Zero();
-        current_act_ee_pos[ee_name] = hrp::Vector3::Zero();
-        current_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
-        prev_ref_ee_pos[ee_name] = hrp::Vector3::Zero();
+        act_eepos[ee_name] = hrp::Vector3::Zero();
+        ref_eepos[ee_name] = hrp::Vector3::Zero();
+        //prev_ref_eepos[ee_name] = hrp::Vector3::Zero();
         act_ee_vel[ee_name] = hrp::Vector3::Zero();
         ref_ee_vel[ee_name] = hrp::Vector3::Zero();
         act_ee_w[ee_name] = hrp::Vector3::Zero();
         ref_ee_w[ee_name] = hrp::Vector3::Zero();
-        current_act_ee_rot[ee_name] = hrp::Matrix33::Identity();
-        current_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
-        prev_ref_ee_rot[ee_name] = hrp::Matrix33::Identity();
+        act_eeR[ee_name] = hrp::Matrix33::Identity();
+        ref_eeR[ee_name] = hrp::Matrix33::Identity();
+        prev_ref_eeR[ee_name] = hrp::Matrix33::Identity();
         ee_vel_error[ee_name] = hrp::dvector::Zero(6);
-        ee_w_error[ee_name] = hrp::dvector::Zero(6);;
+        ee_w_error[ee_name] = hrp::dvector::Zero(6);
         RMSfilter<hrp::Vector3> temp_vel_filter(5, RTC_PERIOD);
         ee_vel_filter[ee_name] = temp_vel_filter;
+        ref_ee_vel_filter[ee_name] = temp_vel_filter;
         RMSfilter<hrp::Matrix33> temp_w_filter(5, RTC_PERIOD);
         ee_w_filter[ee_name] = temp_w_filter;
-        oscontrol_initialized[ee_name] = false;
+        ref_ee_w_filter[ee_name] = temp_w_filter;
+        geteestates_initialized[ee_name] = false;
         //for velocity estimation
         velest_now[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
         velest_prev[ee_name] = hrp::dvector::Zero(p.manip->numJoints());
@@ -371,9 +375,66 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         overwrite_refangle[ee_name] = false;
         stop_overwriting_q_transition_count[ee_name] = 0;
         eeest_initialized[ee_name] = false;
-        observe_disturbance[ee_name] = false;
         dist_obs_initialized[ee_name] = false;
         reftqregulator_initialized[ee_name] = false;
+        //for error check & mode selection
+        TaskDescription td;
+        TaskState ts;
+        td.type = MOVE_POS;
+        td.dual = false;
+        td.velocity_check_dir = hrp::Vector3(1.0, 0.0, 0.0);
+        td.F_init.resize(6);
+        td.F_init = hrp::dvector::Zero(6);
+        td.vel_force_gain = 10.0;
+        td.w_force_gain = 0.0;
+        td.rel_pos_target = hrp::Vector3::Zero();
+        td.rel_ori_target = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
+        td.vel_check_thresh = 0.3;
+        td.vel_check_limit = 1.0;
+        td.cont_vel_error_limit = 1.0;
+        td.cont_w_error_limit = deg2rad(90);
+        td.pos_target_thresh = 0.05; //m
+        td.pos_error_limit = 0.15; //m
+        td.ori_target_thresh = std::cos(deg2rad(5.0/2.0)); //5.0 degrees
+        td.ori_error_limit = std::cos(deg2rad(20.0/2.0)); //20.0 degrees
+        ts.world_pos_target = hrp::Vector3::Zero();
+        ts.world_ori_target = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
+        ts.world_pos_targ_dir = hrp::Vector3(1.0, 0.0, 0.0);
+        ts.world_ori_targ_dir = hrp::Vector3(1.0, 0.0, 0.0);
+        ts.F_now.resize(6);
+        ts.F_now = hrp::dvector::Zero(6);
+        ts.pos_over_limit = false;
+        ts.pos_reach_target = false;
+        ts.ori_over_limit = false;
+        ts.ori_reach_target = false;
+        ts.vel_over_thresh = false;
+        ts.vel_over_limit = false;
+        ts.w_over_limit = false;
+        ts.torque_over_limit = false;
+        ts.F_eeR = hrp::Matrix33::Identity();
+        ts.f2c_transition_count = 0;
+        ts.max_f2c_t_count = 500;
+        ts.em_transition_count = 0;
+        ts.max_em_t_count = 300;
+        ts.F_em_init.resize(6);
+        ts.init_point_vel = 0.0;
+        ts.init_point_w = 0.0;
+        ts.initial_pos = hrp::Vector3::Zero();
+        ts.initial_ori = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
+        ts.emergency_q.resize(p.manip->numJoints());
+        limb_task_target[ee_name] = td;
+        limb_task_state[ee_name] = ts;
+        release_emergency_called[ee_name] = false;
+        fix_mode_normal[ee_name] = true; // do not enable modeselector by default
+        // temporary: setting global for debugging
+        check_dir_vel_err[ee_name] = 0.0;
+        other_dir_vel_err[ee_name] = 0.0;
+        dist_to_target[ee_name] = 0.0;
+        pos_error_norm[ee_name] = 0.0;
+        pdist_to_target[ee_name] = 0.0;
+        ppos_error_norm[ee_name] = 0.0;
+        target_dir_quatdiffw[ee_name] = 1.0;
+        unwanted_dir_quatdiffw[ee_name] = 1.0;
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -440,16 +501,22 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     invdyn_grav_tq.resize(dof);
     eecomp_tq.resize(dof);
     nullspace_tq.resize(dof);
+    // error checkers
     reference_torque.resize(dof);
+    idle_vlimit = 0.3; //1.0m/s = 3.6 km/h
+    idle_olimit  = std::cos(deg2rad(45.0/2.0)); //45 degrees
+    compliant_end_vel_thresh = 0.05; //0.05 m/s
     overwritten_qRef_prev.resize(dof); // use this because ref_vel in iob is calculated as (ref_q - prev_ref_q) / dt
+    reference_climit.resize(dof);
     estimated_reference_velocity.resize(dof);
     transition_velest.resize(dof);
     log_est_q.resize(dof);
     log_act_q.resize(dof);
     log_ref_q.resize(dof);
+
     max_stop_overwriting_q_transition_count = 1000;
     for (int i=0; i<dof; ++i){
-        coil::stringTo(m_robot->joint(i)->climit, ltc_climit_str[i].c_str()); //limiting current value to one in conf file
+        coil::stringTo(reference_climit(i), ltc_climit_str[i].c_str()); //limiting current value to one in conf file
         qoldRef[i] = 0.0;
         dqoldRef[i] = 0.0;
     }
@@ -490,115 +557,120 @@ RTC::ReturnCode_t LimbTorqueController::onActivated(RTC::UniqueId ec_id)
 
 RTC::ReturnCode_t LimbTorqueController::onDeactivated(RTC::UniqueId ec_id)
 {
-  Guard guard(m_mutex);
-  std::cerr << "[" << m_profile.instance_name<< "] onDeactivated(" << ec_id << ")" << std::endl;
+    Guard guard(m_mutex);
+    std::cerr << "[" << m_profile.instance_name<< "] onDeactivated(" << ec_id << ")" << std::endl;
 
-  //必要ならパラメータ等リセット
-  return RTC::RTC_OK;
+    //必要ならパラメータ等リセット
+    return RTC::RTC_OK;
 }
 
 #define DEBUGP ((m_debugLevel==1 && loop%200==0) || m_debugLevel > 1 )
 RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 {
     if(DEBUGP){
-       std::cout << "[" << m_profile.instance_name << "]" << "(" << ec_id << "):" << __func__ << std::endl;
-   }
-   loop ++;
+        std::cout << "[" << m_profile.instance_name << "]" << "(" << ec_id << "):" << __func__ << std::endl;
+    }
+    loop ++;
 
-   //Read Import
+    //Read Import
     for (unsigned int i=0; i<m_forceIn.size(); i++){
-      if ( m_forceIn[i]->isNew() ) {
-          m_forceIn[i]->read();
-      }
+        if ( m_forceIn[i]->isNew() ) {
+            m_forceIn[i]->read();
+        }
         // TODO: add ref force
         // if ( m_ref_forceIn[i]->isNew() ) {
         //     m_ref_forceIn[i]->read();
         // }
-   }
-   if (m_qCurrentIn.isNew()) {
-       m_qCurrentIn.read();
-   }
-   if (m_dqCurrentIn.isNew()) {
-       m_dqCurrentIn.read();
-   }
-   if (m_tqCurrentIn.isNew()) {
-       m_tqCurrentIn.read();
-   }
-   if (m_qRefIn.isNew()) {
-       m_qRefIn.read();
-   }
-   if (m_tqRefIn.isNew()) {
-       m_tqRefIn.read();
-   }
-   if (m_basePosIn.isNew()) {
-       m_basePosIn.read();
-   }
-   if (m_baseRpyIn.isNew()) {
-       m_baseRpyIn.read();
-   }
-   if (m_rpyIn.isNew()) {
-       m_rpyIn.read();
-   }
+    }
+    if (m_qCurrentIn.isNew()) {
+        m_qCurrentIn.read();
+    }
+    if (m_dqCurrentIn.isNew()) {
+        m_dqCurrentIn.read();
+    }
+    if (m_tqCurrentIn.isNew()) {
+        m_tqCurrentIn.read();
+    }
+    if (m_qRefIn.isNew()) {
+        m_qRefIn.read();
+    }
+    if (m_tqRefIn.isNew()) {
+        m_tqRefIn.read();
+    }
+    if (m_basePosIn.isNew()) {
+        m_basePosIn.read();
+    }
+    if (m_baseRpyIn.isNew()) {
+        m_baseRpyIn.read();
+    }
+    if (m_rpyIn.isNew()) {
+        m_rpyIn.read();
+    }
 
-   Guard guard(m_mutex);
-   if ( m_qRef.data.length() ==  m_robot->numJoints() &&
-        m_qCurrent.data.length() ==  m_robot->numJoints() &&
-        m_dqCurrent.data.length() == m_robot->numJoints() &&
-        m_tqCurrent.data.length() == m_robot->numJoints()) {
-       getTargetParameters(); //上位から来るref値を変数にセット
-       calcForceMoment();
-       getActualParameters(); //センサ値を変数にセット
+    Guard guard(m_mutex);
+    if ( m_qRef.data.length() ==  m_robot->numJoints() &&
+         m_qCurrent.data.length() ==  m_robot->numJoints() &&
+         m_dqCurrent.data.length() == m_robot->numJoints() &&
+         m_tqCurrent.data.length() == m_robot->numJoints()) {
+        // set parameters
+        getTargetParameters(); //上位から来るref値を変数にセット
+        calcForceMoment();
+        getActualParameters(); //センサ値を変数にセット
+        getEEStates(); //エンドエフェクタの位置、速度、力をget
+        estimateEEVelForce();
+        // error check
+        VelocityErrorChecker();
+        PositionErrorChecker();
+        ActualTorqueChecker();
+        ModeSelector();
+        ReferenceForceUpdater();
 
-       calcLimbInverseDynamics();
-       calcEECompensation();
-       calcNullJointDumping();
-       //estimateRefdq(); // to be tested more
-       estimateEEVelForce();
-       DisturbanceObserver();
-       RefTorqueRegulator();
-       // CollisionDetector();
+        calcRefTorque();
+        //estimateRefdq(); // to be tested more
+        //CollisionDetector();
+        ReferenceTorqueChecker();
 
-       // set reference joint angles and torques
-       for ( size_t i = 0; i<m_robot->numJoints(); ++i){
-           m_q.data[i] = m_robotRef->joint(i)->q;
-           hrp::Link* current_joint = m_robot->joint(i);
-           // checking torque limits
-           double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
-           if (reference_torque(i) > max_torque){
-               if(loop%100 == 0){
-                   std::cout << "[ltc]joint(" << i << ") reached max torque limit!!"
-                             << "original ref=" << reference_torque(i) << ",max=" << max_torque
-                             << std::endl;
-               }
-               reference_torque(i) = max_torque;
-           }else if (reference_torque(i) < -max_torque){
-               if(loop%100 == 0){
-                   std::cout << "[ltc]joint(" << i << ") reached min torque limit!!"
-                             << " original ref=" << reference_torque(i) << ",min=" << -max_torque
-                             << std::endl;
-               }
-               reference_torque(i) = -max_torque;
-           }
-           m_tq.data[i] = reference_torque(i);
-       }
+        // set reference joint angles and torques
+        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
+            m_q.data[i] = m_robotRef->joint(i)->q;
+            hrp::Link* current_joint = m_robot->joint(i);
+            // checking torque limits
+            double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+            if (reference_torque(i) > max_torque){
+                if(loop%100 == 0){
+                    std::cout << "[ltc]joint(" << i << ") reached max torque limit!!"
+                              << "original ref=" << reference_torque(i) << ",max=" << max_torque
+                              << std::endl;
+                }
+                reference_torque(i) = max_torque;
+            }else if (reference_torque(i) < -max_torque){
+                if(loop%100 == 0){
+                    std::cout << "[ltc]joint(" << i << ") reached min torque limit!!"
+                              << " original ref=" << reference_torque(i) << ",min=" << -max_torque
+                              << std::endl;
+                }
+                reference_torque(i) = -max_torque;
+            }
+            m_tq.data[i] = reference_torque(i);
+        }
 
-       m_qOut.write();
-       m_tqOut.write();
-   }
+        m_qOut.write();
+        m_tqOut.write();
+    }
 
-   if(spit_log){
-       DebugOutput();
-   }
+    if(spit_log){
+        DebugOutput();
+    }
 
-   if (loop%1000 == 0){
-       std::cout << "[ltc] torque ref is: [";
-       for ( size_t i = 0; i<m_robot->numJoints(); ++i){
-           std::cout << m_tq.data[i] << ", ";
-       }
-       std::cout << "]" << std::endl;
-   }
+    if (loop%1000 == 0){
+        std::cout << "[ltc] torque ref is: [";
+        for ( size_t i = 0; i<m_robot->numJoints(); ++i){
+            std::cout << m_tq.data[i] << ", ";
+        }
+        std::cout << "]" << std::endl;
+    }
 
-   return RTC::RTC_OK;
+    return RTC::RTC_OK;
 }
 
 void LimbTorqueController::getTargetParameters()
@@ -628,72 +700,62 @@ void LimbTorqueController::getTargetParameters()
     m_robotRef->rootLink()->p = target_root_p;
     m_robotRef->rootLink()->R = target_root_R;
     m_robotRef->calcForwardKinematics();
-    std::map<std::string, LTParam>::iterator it = m_ref_lt_param.begin();
-    while(it != m_ref_lt_param.end()){
-        std::string ee_name = it->first;
-        LTParam& param = it->second;
-        // if(param.is_active){
-        //     hrp::JointPathExPtr manip = param.manip;
-        //     manip->calcJacobian(ref_ee_jacobian[ee_name]);
-        // }
-        it++;
-    }
 }
 
 // copied from ImpedanceController
 void LimbTorqueController::calcForceMoment ()
 {
-      for (unsigned int i=0; i<m_forceIn.size(); i++){
+    for (unsigned int i=0; i<m_forceIn.size(); i++){
         if ( m_force[i].data.length()==6 ) {
-          std::string sensor_name = m_forceIn[i]->name();
-          hrp::ForceSensor* sensor = m_robot->sensor<hrp::ForceSensor>(sensor_name);
-          hrp::Vector3 data_p(m_force[i].data[0], m_force[i].data[1], m_force[i].data[2]);
-          hrp::Vector3 data_r(m_force[i].data[3], m_force[i].data[4], m_force[i].data[5]);
-          // hrp::Vector3 ref_data_p(m_ref_force[i].data[0], m_ref_force[i].data[1], m_ref_force[i].data[2]);
-          // hrp::Vector3 ref_data_r(m_ref_force[i].data[3], m_ref_force[i].data[4], m_ref_force[i].data[5]);
-          if ( DEBUGP ) {
-            std::cerr << "[" << m_profile.instance_name << "] force and moment [" << sensor_name << "]" << std::endl;
-            std::cerr << "[" << m_profile.instance_name << "]   sensor force  = " << data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
-            std::cerr << "[" << m_profile.instance_name << "]   sensor moment = " << data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
-            // std::cerr << "[" << m_profile.instance_name << "]   reference force  = " << ref_data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
-            // std::cerr << "[" << m_profile.instance_name << "]   reference moment = " << ref_data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
-          }
-          hrp::Matrix33 sensorR;
-          hrp::Vector3 sensorPos, eePos;
-          if ( sensor ) {
-            // real force sensore
-            sensorR = sensor->link->R * sensor->localR;
-            sensorPos = sensor->link->p + sensorR * sensor->localPos;
-          } else if ( m_vfs.find(sensor_name) !=  m_vfs.end()) {
-            // virtual force sensor
+            std::string sensor_name = m_forceIn[i]->name();
+            hrp::ForceSensor* sensor = m_robot->sensor<hrp::ForceSensor>(sensor_name);
+            hrp::Vector3 data_p(m_force[i].data[0], m_force[i].data[1], m_force[i].data[2]);
+            hrp::Vector3 data_r(m_force[i].data[3], m_force[i].data[4], m_force[i].data[5]);
+            // hrp::Vector3 ref_data_p(m_ref_force[i].data[0], m_ref_force[i].data[1], m_ref_force[i].data[2]);
+            // hrp::Vector3 ref_data_r(m_ref_force[i].data[3], m_ref_force[i].data[4], m_ref_force[i].data[5]);
             if ( DEBUGP ) {
-              std::cerr << "[" << m_profile.instance_name << "]   sensorR = " << m_vfs[sensor_name].localR.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+                std::cerr << "[" << m_profile.instance_name << "] force and moment [" << sensor_name << "]" << std::endl;
+                std::cerr << "[" << m_profile.instance_name << "]   sensor force  = " << data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+                std::cerr << "[" << m_profile.instance_name << "]   sensor moment = " << data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+                // std::cerr << "[" << m_profile.instance_name << "]   reference force  = " << ref_data_p.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+                // std::cerr << "[" << m_profile.instance_name << "]   reference moment = " << ref_data_r.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
             }
-            sensorR = m_vfs[sensor_name].link->R * m_vfs[sensor_name].localR;
-            sensorPos = m_vfs[sensor_name].link->p + m_vfs[sensor_name].link->R * m_vfs[sensor_name].localPos;
-          } else {
-            std::cerr << "[" << m_profile.instance_name << "]   unknown force param" << std::endl;
-          }
-          abs_forces[sensor_name] = sensorR * data_p;
-          for ( std::map<std::string, LTParam>::iterator it = m_lt_param.begin(); it != m_lt_param.end(); it++ ) {
-              if ( it->second.sensor_name == sensor_name ) eePos = ee_map[sensor_name].localPos;
-          }
-          abs_moments[sensor_name] = sensorR * data_r + (sensorPos - eePos).cross(abs_forces[sensor_name]);
-          // End effector local frame
-          // hrp::Matrix33 eeR (parentlink->R * ee_map[parentlink->name].localR);
-          // abs_ref_forces[sensor_name] = eeR * ref_data_p;
-          // abs_ref_moments[sensor_name] = eeR * ref_data_r;
-          // World frame
-          // abs_ref_forces[sensor_name] = ref_data_p;
-          // abs_ref_moments[sensor_name] = ref_data_r;
-          if ( DEBUGP ) {
-            std::cerr << "[" << m_profile.instance_name << "]   abs force  = " << abs_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
-            std::cerr << "[" << m_profile.instance_name << "]   abs moment = " << abs_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
-            // std::cerr << "[" << m_profile.instance_name << "]   abs ref force  = " << abs_ref_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
-            // std::cerr << "[" << m_profile.instance_name << "]   abs ref moment = " << abs_ref_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
-          }
+            hrp::Matrix33 sensorR;
+            hrp::Vector3 sensorPos, eePos;
+            if ( sensor ) {
+                // real force sensore
+                sensorR = sensor->link->R * sensor->localR;
+                sensorPos = sensor->link->p + sensorR * sensor->localPos;
+            } else if ( m_vfs.find(sensor_name) !=  m_vfs.end()) {
+                // virtual force sensor
+                if ( DEBUGP ) {
+                    std::cerr << "[" << m_profile.instance_name << "]   sensorR = " << m_vfs[sensor_name].localR.format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", "\n", "    [", "]")) << std::endl;
+                }
+                sensorR = m_vfs[sensor_name].link->R * m_vfs[sensor_name].localR;
+                sensorPos = m_vfs[sensor_name].link->p + m_vfs[sensor_name].link->R * m_vfs[sensor_name].localPos;
+            } else {
+                std::cerr << "[" << m_profile.instance_name << "]   unknown force param" << std::endl;
+            }
+            abs_forces[sensor_name] = sensorR * data_p;
+            for ( std::map<std::string, LTParam>::iterator it = m_lt_param.begin(); it != m_lt_param.end(); it++ ) {
+                if ( it->second.sensor_name == sensor_name ) eePos = ee_map[sensor_name].localPos;
+            }
+            abs_moments[sensor_name] = sensorR * data_r + (sensorPos - eePos).cross(abs_forces[sensor_name]);
+            // End effector local frame
+            // hrp::Matrix33 eeR (parentlink->R * ee_map[parentlink->name].localR);
+            // abs_ref_forces[sensor_name] = eeR * ref_data_p;
+            // abs_ref_moments[sensor_name] = eeR * ref_data_r;
+            // World frame
+            // abs_ref_forces[sensor_name] = ref_data_p;
+            // abs_ref_moments[sensor_name] = ref_data_r;
+            if ( DEBUGP ) {
+                std::cerr << "[" << m_profile.instance_name << "]   abs force  = " << abs_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+                std::cerr << "[" << m_profile.instance_name << "]   abs moment = " << abs_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+                // std::cerr << "[" << m_profile.instance_name << "]   abs ref force  = " << abs_ref_forces[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[N]" << std::endl;
+                // std::cerr << "[" << m_profile.instance_name << "]   abs ref moment = " << abs_ref_moments[sensor_name].format(Eigen::IOFormat(Eigen::StreamPrecision, 0, ", ", ", ", "", "", "[", "]")) << "[Nm]" << std::endl;
+            }
         }
-      }
+    }
 }
 
 void LimbTorqueController::getActualParameters()
@@ -722,21 +784,141 @@ void LimbTorqueController::getActualParameters()
 #endif
     m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics();
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        std::string ee_name = it->first;
-        LTParam& param = it->second;
-        if(param.is_active){
-            hrp::JointPathExPtr manip = param.manip;
-            manip->calcJacobian(act_ee_jacobian[ee_name]);
-        }
-        it++;
-    }
 }
 
-void LimbTorqueController::calcLimbInverseDynamics()
+void LimbTorqueController::getEEStates()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            std::string ee_name = it->first;
+            LTParam& param = it->second;
+            LTParam& ref_param = m_ref_lt_param[ee_name];
+            hrp::JointPathExPtr manip = param.manip;
+            hrp::JointPathExPtr ref_manip = ref_param.manip;
+            // calculate jacobian, inverse, and null
+            manip->calcJacobian(act_ee_jacobian[ee_name]);
+            manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], inv_act_ee_jacobian[ee_name], null_act_ee_jacobian[ee_name]); // including min/max avoidance
+            hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
+            hrp::Link* ref_el = m_robotRef->link(ee_map[ee_name].target_name);
+            // end-effector position
+            act_eepos[ee_name] = act_el->p + act_el->R*ee_map[ee_name].localPos;
+            ref_eepos[ee_name] = ref_el->p + ref_el->R*ee_map[ee_name].localPos;
+            ee_pos_error[ee_name] = ref_eepos[ee_name] - act_eepos[ee_name];
+            // end-effector orientation
+            act_eeR[ee_name] = act_el->R * ee_map[ee_name].localR;
+            ref_eeR[ee_name] = ref_el->R * ee_map[ee_name].localR;
+            act_eequat[ee_name] = act_eeR[ee_name]; // converting to quaternion
+            ref_eequat[ee_name] = ref_eeR[ee_name]; // converting to quaternion
+            hrp::dquaternion quat_diff;
+            safe_quaternion_comparison(ref_eequat[ee_name], act_eequat[ee_name], quat_diff);
+            ee_ori_error[ee_name] = quat_diff.vec();
+            // set current paramters to previous parameters (run only at first)
+            if(!geteestates_initialized[ee_name]){
+                ee_vel_filter[ee_name].fill(act_eepos[ee_name]);
+                ee_w_filter[ee_name].fill(act_eeR[ee_name]);
+                ref_ee_vel_filter[ee_name].fill(ref_eepos[ee_name]);
+                ref_ee_w_filter[ee_name].fill(ref_eeR[ee_name]);
+                //prev_ref_eepos[ee_name] = ref_eepos[ee_name];
+                //prev_ref_eeR[ee_name] = ref_eeR[ee_name];
+                geteestates_initialized[ee_name] = true;
+            }
+            // set current position, rotation to the head of filters
+            ee_vel_filter[ee_name].push(act_eepos[ee_name]);
+            ref_ee_vel_filter[ee_name].push(ref_eepos[ee_name]);
+            ee_w_filter[ee_name].push(act_eeR[ee_name]);
+            ref_ee_w_filter[ee_name].push(ref_eeR[ee_name]);
+            // calculate ee velocity
+            act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
+            //ref_ee_vel[ee_name] = (ref_eepos[ee_name] - prev_ref_eepos[ee_name]) / RTC_PERIOD;
+            ref_ee_vel[ee_name] = ref_ee_vel_filter[ee_name].get_velocity();
+            ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
+            // callulate ee angular velocity
+            hrp::Matrix33 act_ee_w_omega_mat = ee_w_filter[ee_name].get_velocity() * act_eeR[ee_name].transpose();
+            hrp::Matrix33 ref_ee_w_omega_mat = ref_ee_w_filter[ee_name].get_velocity() * ref_eeR[ee_name].transpose();
+            //hrp::Matrix33 ref_ee_w_omega_mat = ((ref_eeR[ee_name] - prev_ref_eeR[ee_name])/RTC_PERIOD) * ref_eeR[ee_name].transpose();
+            act_ee_w[ee_name] <<
+                ((act_ee_w_omega_mat(2,1) - act_ee_w_omega_mat(1,2)) / 2),
+                ((act_ee_w_omega_mat(0,2) - act_ee_w_omega_mat(2,0)) / 2),
+                ((act_ee_w_omega_mat(1,0) - act_ee_w_omega_mat(0,1)) / 2);
+            ref_ee_w[ee_name] <<
+                ((ref_ee_w_omega_mat(2,1) - ref_ee_w_omega_mat(1,2)) / 2),
+                ((ref_ee_w_omega_mat(0,2) - ref_ee_w_omega_mat(2,0)) / 2),
+                ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
+            ee_w_error[ee_name] = ref_ee_w[ee_name] - act_ee_w[ee_name];
+
+            // save current position, rotation as previous
+            //prev_ref_eepos[ee_name] = ref_eepos[ee_name];
+            //prev_ref_eeR[ee_name] = ref_eeR[ee_name];
+        } // end if param is active
+        it++;
+    } //end while
+}
+
+void LimbTorqueController::calcRefTorque()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        if (param.is_active) {
+            switch(param.amode){
+            case(EMERGENCY):
+                calcEmergencyLimbInverseDynamics(it);
+                calcEmergencyEECompensation(it);
+                calcEmergencyNullJointDumping(it);
+                // std::cout << std::endl << "MODE: EMREGENCY" << std::endl;
+                // std::cout << "EE: " << it->first << std::endl;
+                // std::cout << "invdyn_accvel_tq = " << invdyn_accvel_tq.transpose() << std::endl;
+                // std::cout << "invdyn_grav_tq = " << invdyn_grav_tq.transpose() << std::endl;
+                // std::cout << "eecomp_tq = " << eecomp_tq.transpose() << std::endl;
+                // std::cout << "nullspace_tq = " << nullspace_tq.transpose() << std::endl;
+                break;
+            case(MANIP_CONTACT):
+                calcEmergencyLimbInverseDynamics(it);
+                calcContactEECompensation(it);
+                calcEmergencyNullJointDumping(it);
+                // std::cout << std::endl << "MODE: CONTACT" << std::endl;
+                // std::cout << "EE: " << it->first << std::endl;
+                // std::cout << "invdyn_accvel_tq = " << invdyn_accvel_tq.transpose() << std::endl;
+                // std::cout << "invdyn_grav_tq = " << invdyn_grav_tq.transpose() << std::endl;
+                // std::cout << "eecomp_tq = " << eecomp_tq.transpose() << std::endl;
+                // std::cout << "nullspace_tq = " << nullspace_tq.transpose() << std::endl;
+                // if(strcmp(it->first.c_str(), "rarm")==0){
+                //     std::cout << "invdyn_accvel_tq = " << invdyn_accvel_tq.transpose() << std::endl;
+                //     std::cout << "invdyn_grav_tq = " << invdyn_grav_tq.transpose() << std::endl;
+                //     std::cout << "eecomp_tq = " << eecomp_tq.transpose() << std::endl;
+                //     std::cout << "nullspace_tq = " << nullspace_tq.transpose() << std::endl;
+                // }
+                break;
+            case(IDLE_COMPLIANT):
+                //TODO
+                calcLimbInverseDynamics(it);
+                calcEECompensation(it);
+                calcNullJointDumping(it);
+                break;
+            case(IDLE_HARD):
+                //TODO
+                calcLimbInverseDynamics(it);
+                calcEECompensation(it);
+                calcNullJointDumping(it);
+                break;
+            default: //IDLE_NORMAL, MANIP_FREE
+                calcLimbInverseDynamics(it);
+                calcEECompensation(it);
+                calcNullJointDumping(it);
+                break;
+            }
+        } // end if active
+        it++;
+    } // end while
+    reference_torque = invdyn_accvel_tq + invdyn_grav_tq + eecomp_tq + nullspace_tq;
+}
+
+void LimbTorqueController::calcLimbInverseDynamics(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
     int robotdof = m_robot->numJoints();
     hrp::dvector ref_dq_backup(robotdof), ref_ddq_backup(robotdof), act_dq_backup(robotdof), act_ddq_backup(robotdof), act_tq_backup(robotdof); // backup
     for(int i=0; i<robotdof; ++i){
@@ -746,53 +928,43 @@ void LimbTorqueController::calcLimbInverseDynamics()
         act_ddq_backup(i) = m_robot->joint(i)->ddq;
         act_tq_backup(i) = m_robot->joint(i)->u; //not necessary right now
     }
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            std::string ee_name = it->first;
-            LTParam& ref_param = m_ref_lt_param[ee_name];
-            hrp::Link* ref_base_link = ref_param.manip->baseLink();
-            hrp::Link* base_link = param.manip->baseLink();
-            Eigen::MatrixXd ref_base_rot = ref_base_link->R;
-            Eigen::MatrixXd base_rot = base_link->R;
-            hrp::Vector3 out_f, out_tau;
-            out_f = Eigen::Vector3d::Zero(3);
-            out_tau = Eigen::Vector3d::Zero(3);
-            //TODO: acceleration of baseLink due to fullbody movement
-            if (ref_base_link->parent){
-                ref_base_link->parent->dvo = ref_base_rot * ref_param.gravitational_acceleration;
-                base_link->parent->dvo = base_rot * param.gravitational_acceleration;
-            } else{
-                ref_base_link->dvo = ref_base_rot * ref_param.gravitational_acceleration;
-                base_link->dvo = base_rot * param.gravitational_acceleration;
-            }
-            m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau);
-            for(int i=0; i<ref_param.manip->numJoints(); i++){
-                int jid = ref_param.manip->joint(i)->jointId;
-                invdyn_accvel_tq(jid) = m_robotRef->joint(jid)->u;
-                m_robotRef->joint(jid)->u = 0.0;
-                m_robotRef->joint(jid)->dq = 0.0;
-                m_robotRef->joint(jid)->ddq = 0.0;
-                m_robot->joint(jid)->u = 0.0;
-                m_robot->joint(jid)->dq = 0.0;
-                m_robot->joint(jid)->ddq = 0.0;
-            }
-            out_f = Eigen::Vector3d::Zero(3);
-            out_tau = Eigen::Vector3d::Zero(3);
-            m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau); //gravity compensation for ref
-            out_f = Eigen::Vector3d::Zero(3);
-            out_tau = Eigen::Vector3d::Zero(3);
-            m_robot->calcInverseDynamics(base_link, out_f, out_tau); //gravity compensation for act
-            for(int i=0; i<ref_param.manip->numJoints(); i++){
-                int jid = ref_param.manip->joint(i)->jointId;
-                invdyn_accvel_tq(jid) -= m_robotRef->joint(jid)->u;
-                invdyn_grav_tq(jid) = m_robot->joint(jid)->u;
-            }
-        }
-        ++it;
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    hrp::Link* ref_base_link = ref_param.manip->baseLink();
+    hrp::Link* base_link = param.manip->baseLink();
+    Eigen::MatrixXd ref_base_rot = ref_base_link->R;
+    Eigen::MatrixXd base_rot = base_link->R;
+    hrp::Vector3 out_f, out_tau;
+    out_f = Eigen::Vector3d::Zero(3);
+    out_tau = Eigen::Vector3d::Zero(3);
+    //TODO: acceleration of baseLink due to fullbody movement
+    if (ref_base_link->parent){
+        ref_base_link->parent->dvo = ref_base_rot * ref_param.gravitational_acceleration;
+        base_link->parent->dvo = base_rot * param.gravitational_acceleration;
+    } else{
+        ref_base_link->dvo = ref_base_rot * ref_param.gravitational_acceleration;
+        base_link->dvo = base_rot * param.gravitational_acceleration;
+    }
+    m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau);
+    for(int i=0; i<ref_param.manip->numJoints(); i++){
+        int jid = ref_param.manip->joint(i)->jointId;
+        invdyn_accvel_tq(jid) = m_robotRef->joint(jid)->u;
+        m_robotRef->joint(jid)->u = 0.0;
+        m_robotRef->joint(jid)->dq = 0.0;
+        m_robotRef->joint(jid)->ddq = 0.0;
+        m_robot->joint(jid)->u = 0.0;
+        m_robot->joint(jid)->dq = 0.0;
+        m_robot->joint(jid)->ddq = 0.0;
+    }
+    out_f = Eigen::Vector3d::Zero(3);
+    out_tau = Eigen::Vector3d::Zero(3);
+    m_robotRef->calcInverseDynamics(ref_base_link, out_f, out_tau); //gravity compensation for ref
+    out_f = Eigen::Vector3d::Zero(3);
+    out_tau = Eigen::Vector3d::Zero(3);
+    m_robot->calcInverseDynamics(base_link, out_f, out_tau); //gravity compensation for act
+    for(int i=0; i<ref_param.manip->numJoints(); i++){
+        int jid = ref_param.manip->joint(i)->jointId;
+        invdyn_accvel_tq(jid) -= m_robotRef->joint(jid)->u;
+        invdyn_grav_tq(jid) = m_robot->joint(jid)->u;
     }
     for(int i=0; i<robotdof; i++){
         m_robotRef->joint(i)->u = 0;
@@ -804,39 +976,38 @@ void LimbTorqueController::calcLimbInverseDynamics()
     }
 }
 
-// Do not use this for now: it is not compatible with reference torque regulator for now
-void LimbTorqueController::calcMinMaxAvoidanceTorque()
+void LimbTorqueController::calcEmergencyLimbInverseDynamics(std::map<std::string, LTParam>::iterator it)
 {
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        std::string ee_name = it->first;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            double margin = deg2rad(4.0);
-            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
-                double now_angle = manip->joint(i)->q;
-                double max_angle = manip->joint(i)->ulimit;
-                double min_angle = manip->joint(i)->llimit;
-                if ( (now_angle+margin) >= max_angle ) {
-                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    double avoid_torque = - max_torque/margin*(now_angle - (max_angle-margin));
-                    manip->joint(i)->u = std::min(manip->joint(i)->u, avoid_torque);
-                    if (loop%500 == 0){
-                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
-                }else if ( (now_angle-margin) <= min_angle) {
-                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
-                    double avoid_torque = max_torque/margin*(min_angle+margin - now_angle);
-                    manip->joint(i)->u = std::max(manip->joint(i)->u, avoid_torque);
-                    if (loop%200 == 0){
-                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
-                }
-            }
-        }
-        ++it;
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    int robotdof = m_robot->numJoints();
+    hrp::dvector act_dq_backup(robotdof), act_ddq_backup(robotdof), act_tq_backup(robotdof); // backup
+    for(int i=0; i<robotdof; ++i){
+        act_dq_backup(i) = m_robot->joint(i)->dq;
+        act_ddq_backup(i) = m_robot->joint(i)->ddq;
+        act_tq_backup(i) = m_robot->joint(i)->u; //not necessary right now
+    }
+    hrp::Link* base_link = param.manip->baseLink();
+    Eigen::MatrixXd base_rot = base_link->R;
+    for(int i=0; i<param.manip->numJoints(); i++){
+        int jid = param.manip->joint(i)->jointId;
+        invdyn_accvel_tq(jid) = 0.0;
+        m_robot->joint(jid)->u = 0.0;
+        m_robot->joint(jid)->dq = 0.0;
+        m_robot->joint(jid)->ddq = 0.0;
+    }
+    hrp::Vector3 out_f, out_tau;
+    out_f = Eigen::Vector3d::Zero(3);
+    out_tau = Eigen::Vector3d::Zero(3);
+    m_robot->calcInverseDynamics(base_link, out_f, out_tau); //gravity compensation for act
+    for(int i=0; i<param.manip->numJoints(); i++){
+        int jid = param.manip->joint(i)->jointId;
+        invdyn_grav_tq(jid) = m_robot->joint(jid)->u;
+    }
+    for(int i=0; i<robotdof; i++){
+        m_robot->joint(i)->u = act_tq_backup(i);
+        m_robot->joint(i)->dq = act_dq_backup(i);
+        m_robot->joint(i)->ddq = act_ddq_backup(i);
     }
 }
 
@@ -997,206 +1168,230 @@ void LimbTorqueController::calcGeneralizedInertiaMatrix(std::map<std::string, LT
 }
 
 // calculation "eeR * (some_gain) * eeR.transpose()" can be converted to just "(some_gain)" if the gain is always isotropic
-void LimbTorqueController::calcEECompensation()
+void LimbTorqueController::calcEECompensation(std::map<std::string, LTParam>::iterator it)
 {
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            std::string ee_name = it->first;
-            LTParam& ref_param = m_ref_lt_param[ee_name];
-            hrp::JointPathExPtr manip = param.manip;
-            hrp::JointPathExPtr ref_manip = ref_param.manip;
-            int limb_dof = manip->numJoints();
-            hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
-            hrp::Link* ref_el = m_robotRef->link(ee_map[ee_name].target_name);
-            //hrp::Matrix33 eeR = act_el->R * ee_map[ee_name].localR;
-            hrp::Matrix33 eeR = ref_el->R * ee_map[ee_name].localR;
-            // calculate position, orientation error and compensation force for it
-            current_act_ee_pos[ee_name] = act_el->p + act_el->R*ee_map[ee_name].localPos;
-            current_ref_ee_pos[ee_name] = ref_el->p + ref_el->R*ee_map[ee_name].localPos;
-            ee_pos_error[ee_name] = current_ref_ee_pos[ee_name] - current_act_ee_pos[ee_name];
-            ee_pos_comp_force[ee_name] = eeR * param.ee_pgain_p * eeR.transpose() * ee_pos_error[ee_name];
-
-            // orientation feedback method 1 (seems to work well)
-            hrp::dquaternion act_ee_quat(act_el->R*ee_map[ee_name].localR), ref_ee_quat(ref_el->R*ee_map[ee_name].localR);
-            current_act_ee_ori[ee_name] = act_ee_quat;
-            current_ref_ee_ori[ee_name] = ref_ee_quat;
-            // check and correct jump of quaternion
-            if((current_ref_ee_ori[ee_name].conjugate()*current_act_ee_ori[ee_name]).w() < 0){
-                hrp::dquaternion negated_ref_ee_quat(-current_ref_ee_ori[ee_name].w(), -current_ref_ee_ori[ee_name].x(), -current_ref_ee_ori[ee_name].y(), -current_ref_ee_ori[ee_name].z());
-                current_ref_ee_ori[ee_name] = negated_ref_ee_quat;
-            }
-            // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
-            ee_ori_error[ee_name] = current_ref_ee_ori[ee_name].w()*current_act_ee_ori[ee_name].vec() - current_act_ee_ori[ee_name].w()*current_ref_ee_ori[ee_name].vec() + current_ref_ee_ori[ee_name].vec().cross(current_act_ee_ori[ee_name].vec());
-            ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error[ee_name];
-            // orientation feedback method 2 (somehow control go wrong in some cases)
-            // F. Caccavale et al., "Six-DOF Impedance Control of Dual-Arm Cooperative Manipulators," in IEEE/ASME Transactions on Mechatronics, vol.13, no.5, pp.576-586, Oct. 2008.
-            // hrp::dquaternion ee_ori_error_quat = current_ref_ee_ori[ee_name].conjugate() * current_act_ee_ori[ee_name];
-            // ee_ori_comp_moment[ee_name] = - 2.0 * (ee_ori_error_quat.w() * hrp::Matrix33::Identity() + hrp::hat(ee_ori_error_quat.vec())) * (eeR * param.ee_pgain_r * eeR.transpose()) * ee_ori_error_quat.vec();
-
-            if(loop%1000==0){
-                std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
-                std::cout << "pos error is: " << std::endl << ee_pos_error[ee_name].transpose() << std::endl;
-                std::cout << "orientation error is: " << std::endl << ee_ori_error[ee_name].transpose() << std::endl;
-            }
-
-            ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
-            // calculate translational velocity, angular velocity error
-            current_act_ee_rot[ee_name] = act_el->R * ee_map[ee_name].localR;
-            current_ref_ee_rot[ee_name] = ref_el->R * ee_map[ee_name].localR;
-            // set current paramters to previous parameters (run only at first)
-            if(!oscontrol_initialized[ee_name]){
-                ee_vel_filter[ee_name].fill(current_act_ee_pos[ee_name]);
-                ee_w_filter[ee_name].fill(current_act_ee_rot[ee_name]);
-                prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
-                prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
-                oscontrol_initialized[ee_name] = true;
-            }
-            // set current position, rotation to the head of filters
-            ee_vel_filter[ee_name].push(current_act_ee_pos[ee_name]);
-            ee_w_filter[ee_name].push(current_act_ee_rot[ee_name]);
-            // calculate ee velocity
-            act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
-            ref_ee_vel[ee_name] = (current_ref_ee_pos[ee_name] - prev_ref_ee_pos[ee_name]) / RTC_PERIOD;
-            ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
-            // callulate ee angular velocity
-            hrp::Matrix33 act_ee_w_omega_mat = ee_w_filter[ee_name].get_velocity() * current_act_ee_rot[ee_name].transpose();
-            hrp::Matrix33 ref_ee_w_omega_mat = ((current_ref_ee_rot[ee_name] - prev_ref_ee_rot[ee_name])/RTC_PERIOD) * current_ref_ee_rot[ee_name].transpose();
-            act_ee_w[ee_name] <<
-                ((act_ee_w_omega_mat(2,1) - act_ee_w_omega_mat(1,2)) / 2),
-                ((act_ee_w_omega_mat(0,2) - act_ee_w_omega_mat(2,0)) / 2),
-                ((act_ee_w_omega_mat(1,0) - act_ee_w_omega_mat(0,1)) / 2);
-            ref_ee_w[ee_name] <<
-                ((ref_ee_w_omega_mat(2,1) - ref_ee_w_omega_mat(1,2)) / 2),
-                ((ref_ee_w_omega_mat(0,2) - ref_ee_w_omega_mat(2,0)) / 2),
-                ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
-            ee_w_error[ee_name] = ref_ee_w[ee_name] - act_ee_w[ee_name];
-            // multiply gain to error
-            ee_vel_comp_force[ee_name] = eeR * param.ee_dgain_p * eeR.transpose() * ee_vel_error[ee_name];
-            ee_w_comp_moment[ee_name] = eeR * param.ee_dgain_r * eeR.transpose() * ee_w_error[ee_name];
-            ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
-            // map wrench to joint torque
-            ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
-            // save current position, rotation as previous
-            prev_ref_ee_pos[ee_name] = current_ref_ee_pos[ee_name];
-            prev_ref_ee_rot[ee_name] = current_ref_ee_rot[ee_name];
-            // debug output
-            if(loop%1000==0){
-                std::cout << "EE pgain force = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
-                std::cout << "EE vel error = " << ee_vel_error[ee_name].transpose() << std::endl;
-                std::cout << "EE w error = " << ee_w_error[ee_name].transpose() << std::endl;
-                std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
-                std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
-            }
-            // store reference torque values
-            for (int i=0; i<limb_dof; i++){
-                eecomp_tq(manip->joint(i)->jointId) = ee_compensation_torque[ee_name](i);
-            }
-        }
-        ++it;
-    }
-}
-
-void LimbTorqueController::calcNullJointDumping()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        std::string ee_name = it->first;
-        LTParam& ref_param = m_ref_lt_param[ee_name];
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            hrp::JointPathExPtr manip = param.manip;
-            hrp::JointPathExPtr ref_manip = ref_param.manip;
-            int limb_dof = manip->numJoints();
-            hrp::dvector q_error(limb_dof), dq_error(limb_dof);
-            for (int i=0; i<limb_dof; i++) {
-                q_error(i) = ref_manip->joint(i)->q - manip->joint(i)->q;
-                dq_error(i) = ref_manip->joint(i)->dq - manip->joint(i)->dq;
-            }
-            hrp::dmatrix Jnull(limb_dof, limb_dof);
-            manip->calcJacobianInverseNullspace(act_ee_jacobian[ee_name], inv_ee_jacobian[ee_name], Jnull); // including min/max avoidance
-            null_space_torque[ee_name] = Jnull * (param.pgain * q_error + param.dgain * dq_error);
-            if(loop%1000==0){
-                std::cout << "pos error = " << q_error.transpose() << std::endl;
-                std::cout << "null_tau  = " << null_space_torque[ee_name].transpose() << std::endl;
-            }
-            for (int i=0; i<limb_dof; i++){
-                nullspace_tq(manip->joint(i)->jointId) = null_space_torque[ee_name](i);
-            }
-        }
-        it++;
-    }
-}
-
-// re-calculate end-effector compensation with given ref ee position & velocity
-void LimbTorqueController::RecalcEECompensation(const std::map<std::string, LTParam>::iterator it, const hrp::Vector3 _ref_ee_pos, const hrp::dquaternion _ref_ee_ori, const hrp::Vector3 _ref_ee_vel, const hrp::Vector3 _ref_ee_w)
-{
+    std::string ee_name = it->first;
     LTParam& param = it->second;
-    if (param.is_active) {
-        if (DEBUGP) {
-            std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-        }
-        std::string ee_name = it->first;
-        hrp::JointPathExPtr manip = param.manip;
-        int limb_dof = manip->numJoints();
-        hrp::Link* act_el = m_robot->link(ee_map[ee_name].target_name);
-        hrp::Matrix33 eeR = act_el->R * ee_map[ee_name].localR;
-        // calculate position, orientation error and compensation force for it
-        ee_pos_error[ee_name] = _ref_ee_pos - current_act_ee_pos[ee_name];
-        ee_pos_comp_force[ee_name] = eeR * param.ee_pgain_p * eeR.transpose() * ee_pos_error[ee_name];
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::JointPathExPtr ref_manip = ref_param.manip;
+    int limb_dof = manip->numJoints();
+    // calculate position, orientation feedback
+    ee_pos_comp_force[ee_name] = ref_eeR[ee_name] * param.ee_pgain_p * ref_eeR[ee_name].transpose() * ee_pos_error[ee_name]; // position feedback
+    // orientation feedback
+    // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
+    //ee_ori_comp_moment[ee_name] = - ref_eeR[ee_name] * param.ee_pgain_r * ref_eeR[ee_name].transpose() * ee_ori_error[ee_name];
+    ee_ori_comp_moment[ee_name] = ref_eeR[ee_name] * param.ee_pgain_r * ref_eeR[ee_name].transpose() * ee_ori_error[ee_name]; //test
 
-        // orientation feedback
-        // J.S. Yuan, "Closed-loop manipulator control using quaternion feedback," in IEEE Journal on Robotics and Automation, vol.4, no.4, pp.434-440, Aug. 1988.
-        ee_ori_error[ee_name] = _ref_ee_ori.w()*current_act_ee_ori[ee_name].vec() - current_act_ee_ori[ee_name].w()*_ref_ee_ori.vec() + _ref_ee_ori.vec().cross(current_act_ee_ori[ee_name].vec());
-        ee_ori_comp_moment[ee_name] = - eeR * param.ee_pgain_r * eeR.transpose() * ee_ori_error[ee_name];
+    if(loop%1000==0){
+        std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
+        std::cout << "pos error is: " << std::endl << ee_pos_error[ee_name].transpose() << std::endl;
+        std::cout << "orientation error is: " << std::endl << ee_ori_error[ee_name].transpose() << std::endl;
+    }
+    ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
 
-        if(loop%1000==0){
-            std::cout << "EE Compensation Debug for " << ee_name << " start"  << std::endl;
-            std::cout << "pos error is: " << std::endl << ee_pos_error[ee_name].transpose() << std::endl;
-            std::cout << "orientation error is: " << std::endl << ee_ori_error[ee_name].transpose() << std::endl;
-        }
+    // calculate velocity, angular velocity feedback
+    ee_vel_comp_force[ee_name] = ref_eeR[ee_name] * param.ee_dgain_p * ref_eeR[ee_name].transpose() * ee_vel_error[ee_name];
+    ee_w_comp_moment[ee_name] = ref_eeR[ee_name] * param.ee_dgain_r * ref_eeR[ee_name].transpose() * ee_w_error[ee_name];
+    ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
 
+    // map wrench to joint torque
+    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
+
+    // debug output
+    if(loop%1000==0){
+        std::cout << "EE pgain force = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE vel error = " << ee_vel_error[ee_name].transpose() << std::endl;
+        std::cout << "EE w error = " << ee_w_error[ee_name].transpose() << std::endl;
+        std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
+    }
+    // store reference torque values
+    for (int i=0; i<limb_dof; i++){
+        eecomp_tq(manip->joint(i)->jointId) = ee_compensation_torque[ee_name](i);
+    }
+}
+
+void LimbTorqueController::calcEmergencyEECompensation(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    TaskState& ts = limb_task_state[ee_name];
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::JointPathExPtr ref_manip = ref_param.manip;
+    int limb_dof = manip->numJoints();
+    // re-calculate position, orientation with emergency states
+    // position & orientation: reference is stopped at the transition to emergency mode
+    hrp::Vector3 em_ee_pos_error = ts.initial_pos - act_eepos[ee_name];
+    hrp::dquaternion em_ee_ori_error_quat;
+    safe_quaternion_comparison(ts.initial_ori, act_eequat[ee_name], em_ee_ori_error_quat);
+    // calculate position, orientation feedback
+    ee_pos_comp_force[ee_name] = act_eeR[ee_name] * param.ee_pgain_p * act_eeR[ee_name].transpose() * em_ee_pos_error; // position feedback
+    // orientation feedback
+    ee_ori_comp_moment[ee_name] = act_eeR[ee_name] * param.ee_pgain_r * act_eeR[ee_name].transpose() * em_ee_ori_error_quat.vec();
+    ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
+
+    // calculate velocity, angular velocity feedback
+    // velocity & angular velocity: reference is zero
+    ee_vel_error[ee_name] = - act_ee_vel[ee_name];
+    ee_w_error[ee_name] = - act_ee_w[ee_name];
+    ee_vel_comp_force[ee_name] = act_eeR[ee_name] * param.ee_dgain_p * act_eeR[ee_name].transpose() * ee_vel_error[ee_name];
+    ee_w_comp_moment[ee_name] = act_eeR[ee_name] * param.ee_dgain_r * act_eeR[ee_name].transpose() * ee_w_error[ee_name];
+    ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
+
+    if(false){
+        std::cout << "initial_pos = " << ts.initial_pos.transpose() << std::endl;
+        std::cout << "act_pos = " << act_eepos[ee_name].transpose() << std::endl;
+        std::cout << "em_ee_pos_error = " << em_ee_pos_error.transpose() << std::endl;
+        std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
+    }
+    hrp::dvector emergency_wrench(6);
+    hrp::Vector3 em_w_f = ts.F_eeR * ts.F_now.head(3);
+    hrp::Vector3 em_w_m = ts.F_eeR * ts.F_now.tail(3);
+    emergency_wrench << em_w_f, em_w_m;
+    // std::cout << std::endl << "Emergency EEComp Torque:" << ee_name << std::endl;
+    // std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+    // std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+    // std::cout << "emergency_wrench = " << emergency_wrench.transpose() << std::endl;
+    // map wrench to joint torque
+    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + emergency_wrench);
+
+    // debug output
+    if(loop%1000==0){
+        std::cout << "EE pgain force = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE vel error = " << ee_vel_error[ee_name].transpose() << std::endl;
+        std::cout << "EE w error = " << ee_w_error[ee_name].transpose() << std::endl;
+        std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
+    }
+    // store reference torque values
+    for (int i=0; i<limb_dof; i++){
+        eecomp_tq(manip->joint(i)->jointId) = ee_compensation_torque[ee_name](i);
+    }
+}
+
+void LimbTorqueController::calcContactEECompensation(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    TaskDescription& td = limb_task_target[ee_name];
+    TaskState& ts = limb_task_state[ee_name];
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::JointPathExPtr ref_manip = ref_param.manip;
+    int limb_dof = manip->numJoints();
+    // position & orientation: reference is stopped at the transition
+    hrp::Vector3 em_ee_pos_error = ts.initial_pos - act_eepos[ee_name];
+    hrp::dquaternion em_ee_ori_error_quat;
+    safe_quaternion_comparison(ts.initial_ori, act_eequat[ee_name], em_ee_ori_error_quat);
+    // calculate position, orientation feedback
+    ee_pos_comp_force[ee_name] = act_eeR[ee_name] * param.ee_pgain_p * act_eeR[ee_name].transpose() * em_ee_pos_error; // position feedback
+    // orientation feedback
+    ee_ori_comp_moment[ee_name] = act_eeR[ee_name] * param.ee_pgain_r * act_eeR[ee_name].transpose() * em_ee_ori_error_quat.vec();
+    switch(td.type){
+    case(MOVE_POS):
+        ee_pos_ori_comp_wrench[ee_name] << hrp::Vector3::Zero(), ee_ori_comp_moment[ee_name];
+        break;
+    case(MOVE_ROT):
+        ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], hrp::Vector3::Zero();
+        break;
+    case(MOVE_POSROT):
+        ee_pos_ori_comp_wrench[ee_name] << hrp::dvector::Zero(6);
+        break;
+    case(FIX):
         ee_pos_ori_comp_wrench[ee_name] << ee_pos_comp_force[ee_name], ee_ori_comp_moment[ee_name];
-        // calculate translational velocity, angular velocity error
-        // calculate ee velocity
-        act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
-        std::cout << "[LTCEMERGENCY] act_ee_vel = " << act_ee_vel[ee_name].transpose() << std::endl;
-        std::cout << "[LTCEMERGENCY] ref_ee_vel = " << ref_ee_vel[ee_name].transpose() << std::endl;
-        ee_vel_error[ee_name] = _ref_ee_vel - act_ee_vel[ee_name];
-        // callulate ee angular velocity
-        hrp::Matrix33 act_ee_w_omega_mat = ee_w_filter[ee_name].get_velocity() * current_act_ee_rot[ee_name].transpose();
-        act_ee_w[ee_name] <<
-            ((act_ee_w_omega_mat(2,1) - act_ee_w_omega_mat(1,2)) / 2),
-            ((act_ee_w_omega_mat(0,2) - act_ee_w_omega_mat(2,0)) / 2),
-            ((act_ee_w_omega_mat(1,0) - act_ee_w_omega_mat(0,1)) / 2);
-        ee_w_error[ee_name] = _ref_ee_w - act_ee_w[ee_name];
-        // multiply gain to error
-        ee_vel_comp_force[ee_name] = eeR * param.ee_dgain_p * eeR.transpose() * ee_vel_error[ee_name];
-        ee_w_comp_moment[ee_name] = eeR * param.ee_dgain_r * eeR.transpose() * ee_w_error[ee_name];
-        ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
-        // map wrench to joint torque
-        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
-        // save current position, rotation as previous
-        prev_ref_ee_pos[ee_name] = _ref_ee_pos;
-        // debug output
-        if(loop%1000==0){
-            std::cout << "EE pgain force = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
-            std::cout << "EE vel error = " << ee_vel_error[ee_name].transpose() << std::endl;
-            std::cout << "EE w error = " << ee_w_error[ee_name].transpose() << std::endl;
-            std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
-            std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
-        }
-        // store reference torque values
-        for (int i=0; i<limb_dof; i++){
-            eecomp_tq(manip->joint(i)->jointId) = ee_compensation_torque[ee_name](i);
-        }
+        break;
+    }
+
+    // calculate velocity, angular velocity feedback
+    // velocity & angular velocity: reference is zero
+    ee_vel_error[ee_name] = - act_ee_vel[ee_name];
+    ee_w_error[ee_name] = - act_ee_w[ee_name];
+    ee_vel_comp_force[ee_name] = act_eeR[ee_name] * param.ee_dgain_p * act_eeR[ee_name].transpose() * ee_vel_error[ee_name];
+    ee_w_comp_moment[ee_name] = act_eeR[ee_name] * param.ee_dgain_r * act_eeR[ee_name].transpose() * ee_w_error[ee_name];
+    ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
+
+    if(false){
+        // std::cout << "initial_pos = " << ts.initial_pos.transpose() << std::endl;
+        // std::cout << "act_pos = " << act_eepos[ee_name].transpose() << std::endl;
+        // std::cout << "em_ee_pos_error = " << em_ee_pos_error.transpose() << std::endl;
+        std::cout << "inintial_ori = " << ts.initial_ori.w() << " " << ts.initial_ori.vec().transpose() << std::endl;
+        std::cout << "act_eequat = " << act_eequat[ee_name].w() << " " << act_eequat[ee_name].vec().transpose() << std::endl;
+        std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
+    }
+    hrp::dvector contact_wrench(6);
+    hrp::Vector3 cont_w_f = ts.F_eeR * ts.F_now.head(3);
+    hrp::Vector3 cont_w_m = ts.F_eeR * ts.F_now.tail(3);
+    contact_wrench << cont_w_f, cont_w_m;
+    // std::cout << std::endl << "Contact EEComp Torque:" << ee_name << std::endl;
+    // std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+    // std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+    // std::cout << "emergency_wrench = " << contact_wrench.transpose() << std::endl;
+    // map wrench to joint torque
+    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + contact_wrench);
+
+    // debug output
+    if(loop%1000==0){
+        std::cout << "EE pgain force = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE vel error = " << ee_vel_error[ee_name].transpose() << std::endl;
+        std::cout << "EE w error = " << ee_w_error[ee_name].transpose() << std::endl;
+        std::cout << "EE dgain force = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
+        std::cout << "EE Compensation Debug for " << ee_name << " end"  << std::endl;
+    }
+    // store reference torque values
+    for (int i=0; i<limb_dof; i++){
+        eecomp_tq(manip->joint(i)->jointId) = ee_compensation_torque[ee_name](i);
+    }
+}
+
+void LimbTorqueController::calcNullJointDumping(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::JointPathExPtr ref_manip = ref_param.manip;
+    int limb_dof = manip->numJoints();
+    hrp::dvector q_error(limb_dof), dq_error(limb_dof);
+    for (int i=0; i<limb_dof; i++) {
+        q_error(i) = ref_manip->joint(i)->q - manip->joint(i)->q;
+        dq_error(i) = ref_manip->joint(i)->dq - manip->joint(i)->dq;
+    }
+    null_space_torque[ee_name] = null_act_ee_jacobian[ee_name] * (param.pgain * q_error + param.dgain * dq_error);
+    if(loop%1000==0){
+        std::cout << "q error = " << q_error.transpose() << std::endl;
+        std::cout << "null_tau  = " << null_space_torque[ee_name].transpose() << std::endl;
+    }
+    for (int i=0; i<limb_dof; i++){
+        nullspace_tq(manip->joint(i)->jointId) = null_space_torque[ee_name](i);
+    }
+}
+
+void LimbTorqueController::calcEmergencyNullJointDumping(std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    LTParam& param = it->second;
+    LTParam& ref_param = m_ref_lt_param[ee_name];
+    hrp::JointPathExPtr manip = param.manip;
+    hrp::JointPathExPtr ref_manip = ref_param.manip;
+    int limb_dof = manip->numJoints();
+    hrp::dvector q_error(limb_dof), dq_error(limb_dof);
+    for (int i=0; i<limb_dof; i++) {
+        q_error(i) = limb_task_state[ee_name].emergency_q(i) - manip->joint(i)->q;
+        dq_error(i) = - manip->joint(i)->dq;
+    }
+    null_space_torque[ee_name] = null_act_ee_jacobian[ee_name] * (param.pgain * q_error + param.dgain * dq_error);
+    if(loop%1000==0){
+        std::cout << "q error = " << q_error.transpose() << std::endl;
+        std::cout << "null_tau  = " << null_space_torque[ee_name].transpose() << std::endl;
+    }
+    for (int i=0; i<limb_dof; i++){
+        nullspace_tq(manip->joint(i)->jointId) = null_space_torque[ee_name](i);
     }
 }
 
@@ -1226,7 +1421,7 @@ void LimbTorqueController::estimateRefdq()
                          + param.ee_pgain_r(0,0) * ee_ori_error[ee_name] * RTC_PERIOD)
                 / ( param.ee_dgain_r(0,0) + param.ee_pgain_r(0,0) * RTC_PERIOD );
             ee_ref_vel << ee_vel_p, ee_vel_r;
-            imp_now[ee_name] = - inv_ee_jacobian[ee_name] * ee_ref_vel; // is sign correct?
+            imp_now[ee_name] = - inv_act_ee_jacobian[ee_name] * ee_ref_vel; // is sign correct?
             if(!velest_initialized[ee_name]){
                 for(int i=0; i<limbdof; i++){
                     int jid = manip->joint(i)->jointId;
@@ -1356,12 +1551,10 @@ void LimbTorqueController::estimateEEVelForce()
 
 void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it)
 {
-    LTParam& param = it->second;
     std::string ee_name = it->first;
     if (DEBUGP) {
         std::cerr << "ここにデバッグメッセージを流す" << std::endl;
     }
-    const hrp::Vector3 zv3 = hrp::Vector3::Zero();
     const hrp::Matrix33 Iden33 = hrp::Matrix33::Identity();
     const Vector2 zv2 = Vector2::Zero();
     const Matrix22 Iden22 = Matrix22::Identity();
@@ -1392,89 +1585,622 @@ void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, L
     filtered_wrench[ee_name].resize(6);
 }
 
-void LimbTorqueController::DisturbanceObserver()
+// eeest_initialized: EE速度フィルタが始まってからチェックする
+// TODO; モード依存のチェック(directional)
+void LimbTorqueController::VelocityErrorChecker()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
         std::string ee_name = it->first;
         if (param.is_active && eeest_initialized[ee_name]) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            TaskDescription& td = limb_task_target[ee_name];
+            TaskState& ts = limb_task_state[ee_name];
+            switch(param.amode){
+                // Free motion
+            case(MANIP_FREE):{
+                hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_screw[ee_name].head(3); // in ee local coordinates
+                // double check_dir_vel_err = td.velocity_check_dir.dot(ref_act_eevel_diff);
+                // double other_dir_vel_err = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                // temporary: setting global for debugging
+                check_dir_vel_err[ee_name] = td.velocity_check_dir.dot(ref_act_eevel_diff);
+                other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                if (check_dir_vel_err[ee_name] > td.vel_check_thresh){
+                    ts.vel_over_thresh = true;
+                }else if (other_dir_vel_err[ee_name] > td.vel_check_limit){
+                    ts.vel_over_limit = true;
+                }
+                break;
+            } // end case manip_normal
+            case(MANIP_CONTACT):{
+                if(filtered_screw[ee_name].head(3).norm() > td.cont_vel_error_limit){
+                    ts.vel_over_limit = true;
+                }
+                break;
+            } // end case manip_contact
+            case(IDLE_NORMAL):{ // mode IDLE_NORMAL
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                if (ref_act_eevel_diff.norm() > 0.1){ //threshold should be tuned
+                    ts.vel_over_limit = true;
+                }
+                break;
             }
-            // initialize
-            if(!dist_obs_initialized[ee_name]){
-                for (int i=0; i<3; i++){
-                    prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
+            case(IDLE_COMPLIANT):{
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                if (ref_act_eevel_diff.norm() < compliant_end_vel_thresh){ //threshold should be tuned
+                    ts.vel_over_thresh = true;
                 }
-                disturbance_detected[ee_name] = false;
-                dist_obs_initialized[ee_name] = true;
+                break;
+            } // end case idle_compliant
+            case(IDLE_HARD):{
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                if (ref_act_eevel_diff.norm() < compliant_end_vel_thresh){ //threshold should be tuned
+                    ts.vel_over_thresh = true;
+                }
+                break;
+            } // end case idle_hard
+            default:{ // EMERGENCY
+                ts.vel_over_limit = false; //do not check
+                break;
             }
-            if(observe_disturbance[ee_name]){
-                // observe discrepancy of reference velocity and filtered velocity (only translational part)
-                for(int i=0; i<3; i++){
-                    velocity_discrepancy[ee_name](i) = filtered_screw[ee_name](i) - ref_ee_vel[ee_name](i);
-                }
-                // observe time increase of filtered force (only translational part)
-                for(int i=0; i<3; i++){
-                    force_increase[ee_name](i) = (filtered_wrench[ee_name](i) - ref_ee_vel[ee_name](i)) / RTC_PERIOD;
-                    prev_filtered_force[ee_name](i) = filtered_wrench[ee_name](i);
-                }
-                if(disturbance_detected[ee_name]){
-                    if(disturbance_uncheck_count[ee_name] > 0){
-                        // ?
-                    }else{
-                        //disturbance_detected[ee_name] = false; //temporary disabling for test
-                    }
-                }else{
-                    // check disturbance
-                    for (int i=0; i<3; i++){
-                        if(velocity_discrepancy[ee_name](i) > 0.1){ //TO be tuned
-                            disturbance_detected[ee_name] = true;
-                            disturbance_uncheck_count[ee_name] = max_disturbance_uncheck_count;
-                        }
-                    }
-                }
-            }
+            } // end switch amode
         }
         it++;
     }
 }
 
-void LimbTorqueController::RefTorqueRegulator()
+// TODO; モード依存のチェック(directional)
+void LimbTorqueController::PositionErrorChecker()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
         std::string ee_name = it->first;
         if (param.is_active && eeest_initialized[ee_name]) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            TaskDescription& td = limb_task_target[ee_name];
+            TaskState& ts = limb_task_state[ee_name];
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            if(!poserrchecker_initialized[ee_name]){
+                minmaxavoid_torque[ee_name].resize(limbdof);
+                poserrchecker_initialized[ee_name] = true;
             }
-            if(!reftqregulator_initialized[ee_name]){
-                max_disturbance_uncheck_count = 1000;
-                disturbance_uncheck_count[ee_name] = 0;
-                reaction_eepos[ee_name] = hrp::Vector3::Zero();
-                reaction_eeori[ee_name] = hrp::dquaternion(1,0,0,0);
-                reaction_eevel[ee_name] = hrp::Vector3::Zero();
-                reaction_eew[ee_name] = hrp::Vector3::Zero();
-                reftqregulator_initialized[ee_name] = true;
+            switch(param.amode){
+            case(MANIP_CONTACT):{
+                switch(td.type){
+                case(MOVE_POS):{
+                    hrp::Vector3 vec_to_target = ts.world_pos_target - act_eepos[ee_name];
+                    //double dist_to_target = vec_to_target.dot(ts.world_pos_targ_dir);
+                    //double pos_error_norm = (vec_to_target - dist_to_target * ts.world_pos_targ_dir).norm();
+                    // temporary: setting global for debugging
+                    dist_to_target[ee_name] = vec_to_target.dot(ts.world_pos_targ_dir);
+                    pos_error_norm[ee_name] = (vec_to_target - dist_to_target[ee_name] * ts.world_pos_targ_dir).norm();
+                    if (dist_to_target[ee_name] <= td.pos_target_thresh){
+                        ts.pos_reach_target = true;
+                    } else if(pos_error_norm[ee_name] > td.pos_error_limit){
+                        ts.pos_over_limit = true;
+                    }
+                } //end case MOVE_POS
+                case(MOVE_ROT):{
+                    // hrp::Vector3 vec_to_target = hrp::rpyFromRot(safe_quaternion_comparison(ts.world_ori_target, act_eequat[ee_name]).toRotationMatrix());
+                    // double dist_to_target = vec_to_target.dot(ts.world_ori_targ_dir);
+                    // double ori_error_norm = (vec_to_target - dist_to_target * ts.world_ori_targ_dir).norm();
+                    hrp::dquaternion eequat_from_act_to_targ;
+                    safe_quaternion_comparison(ts.world_ori_target, act_eequat[ee_name], eequat_from_act_to_targ);
+                    hrp::dquaternion target_dir_quatdiff, unwanted_dir_quatdiff;
+                    // swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, target_dir_quatdiff,  unwanted_dir_quatdiff);
+                    swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, unwanted_dir_quatdiff,  target_dir_quatdiff);
+                    if (target_dir_quatdiff.w() >= td.ori_target_thresh){ //be careful of magnitude relation: comparing cos(x/2) (quatdiff.w() will be bigger near x=0)
+                        ts.ori_reach_target = true;
+                    } else if(unwanted_dir_quatdiff.w() < td.ori_error_limit){ //be careful of magnitude relation: comparing cos(x/2) (quatdiff.w() will be bigger near x=0)
+                        ts.ori_over_limit = true;
+                    }
+                } //end case MOVE_POS
+                case(MOVE_POSROT):{
+                    hrp::Vector3 pvec_to_target = ts.world_pos_target - act_eepos[ee_name];
+                    // double pdist_to_target = pvec_to_target.dot(ts.world_pos_targ_dir);
+                    // double pos_error_norm = (pvec_to_target - pdist_to_target * ts.world_pos_targ_dir).norm();
+                    pdist_to_target[ee_name] = pvec_to_target.dot(ts.world_pos_targ_dir);
+                    ppos_error_norm[ee_name] = (pvec_to_target - pdist_to_target[ee_name] * ts.world_pos_targ_dir).norm();
+                    hrp::dquaternion eequat_from_act_to_targ;
+                    safe_quaternion_comparison(ts.world_ori_target, act_eequat[ee_name], eequat_from_act_to_targ);
+                    hrp::dquaternion target_dir_quatdiff, unwanted_dir_quatdiff;
+                    //swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, target_dir_quatdiff,  unwanted_dir_quatdiff);
+                    swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, unwanted_dir_quatdiff,  target_dir_quatdiff);
+                    if (pdist_to_target[ee_name] <= td.pos_target_thresh){
+                        ts.pos_reach_target = true;
+                    } else if(pos_error_norm[ee_name] > td.pos_error_limit){
+                        ts.pos_over_limit = true;
+                    }
+                    target_dir_quatdiffw[ee_name] = target_dir_quatdiff.w();
+                    unwanted_dir_quatdiffw[ee_name] = unwanted_dir_quatdiff.w();
+                    if (target_dir_quatdiff.w() >= td.ori_target_thresh){ //be careful of magnitude relation: comparing cos(x/2) (quatdiff.w() will be bigger near x=0)
+                        ts.ori_reach_target = true;
+                    } else if(unwanted_dir_quatdiff.w() < td.ori_error_limit){ //be careful of magnitude relation: comparing cos(x/2) (quatdiff.w() will be bigger near x=0)
+                        ts.ori_over_limit = true;
+                    }
+                } //end case MOVE_POSROT
+                case(FIX):
+                    break; //TODO: implement this
+                default:
+                    break; //TODO
+                } //end switch task type
+                break;
+            } // end case MANIP_CONTACT
+            case(EMERGENCY):{
+                break; //do not check
             }
-            if(disturbance_detected[ee_name]){
-                if(disturbance_uncheck_count[ee_name] == max_disturbance_uncheck_count){
-                    reaction_eepos[ee_name] = current_act_ee_pos[ee_name];
-                    reaction_eeori[ee_name] = current_act_ee_ori[ee_name];
-                    reaction_eevel[ee_name] = hrp::Vector3::Zero();
-                    reaction_eew[ee_name] = hrp::Vector3::Zero();
+            default:{ //MANIP_FREE, IDLE_NORMAL, IDLE_COMPLIANT, IDLE_HARD
+                // joint angle min-max check
+                minmaxavoid_torque[ee_name] = hrp::dvector::Zero(limbdof);
+                double mm_margin = deg2rad(3.0); // should be tuned
+                for ( int i = 0; i < limbdof; i++ ) {
+                    double now_angle = manip->joint(i)->q;
+                    double max_angle = manip->joint(i)->ulimit;
+                    double min_angle = manip->joint(i)->llimit;
+                    if ( (now_angle+mm_margin) >= max_angle ) {
+                        double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                        double avoid_torque = - max_torque/mm_margin*(now_angle - (max_angle-mm_margin));
+                        minmaxavoid_torque[ee_name](i) = avoid_torque;
+                    }else if ( (now_angle-mm_margin) <= min_angle) {
+                        double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                        double avoid_torque = max_torque/mm_margin*(min_angle+mm_margin - now_angle);
+                        minmaxavoid_torque[ee_name](i) = avoid_torque;
+                    }
                 }
-                invdyn_accvel_tq = hrp::dvector::Zero(m_robot->numJoints());
-                RecalcEECompensation(it, reaction_eepos[ee_name], reaction_eeori[ee_name], reaction_eevel[ee_name], reaction_eew[ee_name]);
-                disturbance_uncheck_count[ee_name]--;
+                // end-effector orientation error check
+                hrp::dquaternion quat_error;
+                safe_quaternion_comparison(ref_eequat[ee_name], act_eequat[ee_name], quat_error);
+                if (quat_error.w() < idle_olimit){  //be careful of magnitude relation: comparing cos(x/2) (quatdiff.w() will be bigger near x=0)
+                    std::cout << "Error: " << quat_error.w() << std::endl;
+                    std::cout << "Limit: " << idle_olimit << std::endl;
+                    ts.ori_over_limit = true;
+                }
+                break;
+            } //end default case
+            } //end switch
+        }
+        it++;
+    }
+}
+
+void LimbTorqueController::ReferenceTorqueChecker()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            switch(param.amode){
+            case(MANIP_CONTACT):{
+                for (int i = 0; i<limbdof; i++){
+                    int jid = m_robot->joint(i)->jointId;
+                    hrp::Link* current_joint = m_robot->joint(jid);
+                    double max_torque = reference_climit(jid) * current_joint->gearRatio * current_joint->torqueConst;
+                    if (reference_torque(jid) > max_torque){
+                        reference_torque(i) = max_torque;
+                        //limb_task_state[ee_name].torque_over_limit = true;
+                    }else if (reference_torque(jid) < -max_torque){
+                        reference_torque(i) = -max_torque;
+                        //limb_task_state[ee_name].torque_over_limit = true;
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+            } //end switch amode
+        }
+        it++;
+    }
+}
+
+void LimbTorqueController::ActualTorqueChecker()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active && param.amode==MANIP_CONTACT) {
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            for (int i = 0; i<limbdof; i++){
+                int jid = m_robot->joint(i)->jointId;
+                hrp::Link* current_joint = m_robot->joint(jid);
+                double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+                if (actual_torque_vector(jid) > max_torque){
+                    limb_task_state[ee_name].torque_over_limit = true;
+                }else if (actual_torque_vector(jid) < -max_torque){
+                    limb_task_state[ee_name].torque_over_limit = true;
+                }
+            } //end for
+        }
+        it++;
+    }
+}
+
+// Update reference force in MANIP_CONTACT mode
+void LimbTorqueController::ReferenceForceUpdater()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            TaskState& ts = limb_task_state[ee_name];
+            TaskDescription& td = limb_task_target[ee_name];
+            hrp::JointPathExPtr manip = param.manip;
+            // update F_eeR
+            if ( param.amode == MANIP_CONTACT && (td.type == MOVE_ROT || td.type == MOVE_POSROT) ){
+                // TODO
+                hrp::dquaternion eequat_from_act_to_targ;
+                safe_quaternion_comparison(ts.world_ori_target, act_eequat[ee_name], eequat_from_act_to_targ);
+                hrp::dquaternion target_dir_quatdiff, unwanted_dir_quatdiff;
+                //swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, target_dir_quatdiff,  unwanted_dir_quatdiff);
+                swing_twist_decomposition(eequat_from_act_to_targ, td.rel_ori_target, unwanted_dir_quatdiff,  target_dir_quatdiff);//現在姿勢相対で目標姿勢方向を表すクォータニオンを初期姿勢相対で目標姿勢方向を表すクォータニオン方向とそれ以外に分解
+                ts.F_eeR = (target_dir_quatdiff.conjugate() * ts.world_ori_target).toRotationMatrix(); //上記の内、初期姿勢->目標姿勢方向クォータニオン側の成分の共役(逆)を目標姿勢にかけることで、初期姿勢->目標姿勢の経路上に現在姿勢を射影したようになる?
+            }
+            // transition to emergency
+            if(param.amode == EMERGENCY){
+                if(ts.em_transition_count > 0){ //emergency transition
+                    ts.F_now.head(3) = ts.F_em_init.head(3) * ts.em_transition_count / ts.max_em_t_count; //force
+                    ts.F_now.tail(3) = ts.F_em_init.tail(3) * ts.em_transition_count / ts.max_em_t_count; //moment
+                    // std::cout << "[emememeememem]" << std::endl;
+                    // std::cout << "em_transition_count = " << ts.em_transition_count << std::endl;
+                    // std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
+                    ts.em_transition_count--;
+                }
+                if(ts.em_transition_count <= 0){ //emergency stable: waiting for release
+                    ts.F_now = hrp::dvector::Zero(6);
+                }
+            } // end if emergency
+            if(param.amode == MANIP_CONTACT){
+                // transition from MANIP_FREE to MANIP_CONTACT
+                if(ts.f2c_transition_count > 0){
+                    if(td.type != FIX){
+                        ts.F_now.head(3) = (ts.max_f2c_t_count - ts.f2c_transition_count) * td.F_init.head(3) / ts.max_f2c_t_count; //linearly approaching to F_init
+                        if(td.type == MOVE_POSROT){
+                            double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
+                            if(targ_dir_pos_ratio <= 0){
+                                targ_dir_pos_ratio = 0; //マイナスは入れない
+                            }
+                            hrp::dquaternion virtual_ori_target, virtual_ori_diff;
+                            safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
+                            safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
+                            ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec(); // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
+                            // std::cout << std::endl;
+                            // std::cout << ee_name << " Transition to contact: " << std::endl;
+                            // std::cout << "targ_dir_pos_ratio = " << targ_dir_pos_ratio << std::endl;
+                            // std::cout << "initial_ori = " << ts.initial_ori.w() << " " << ts.initial_ori.vec().transpose() << std::endl;
+                            // std::cout << "world_ori_target = " << ts.world_ori_target.w() << " " << ts.world_ori_target.vec().transpose() << std::endl;
+                            // std::cout << "virtual_ori_target = " << virtual_ori_target.w() << " " << virtual_ori_target.vec().transpose() << std::endl;
+                            // std::cout << "act_eequat = " << act_eequat[ee_name].w() << " " << act_eequat[ee_name].vec().transpose() << std::endl;
+                            // std::cout << "virtual_ori_diff = " << virtual_ori_diff.w() << " " << virtual_ori_diff.vec() << std::endl;
+                        }
+                        //ts.F_now.tail(3) = (ts.max_f2c_t_count - ts.f2c_transition_count) * td.F_init.tail(3) / ts.max_f2c_t_count; //linearly approaching to F_init
+                        ts.f2c_transition_count--;
+                        if(ts.f2c_transition_count == 0){
+                            ts.init_point_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
+                            ts.init_point_w = ts.world_ori_targ_dir.dot(filtered_screw[ee_name].tail(3));
+                        }
+                    }
+                }
+                else{ // if transition is over
+                    switch(td.type){
+                    case(MOVE_POS):{
+                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
+                        ts.F_now.head(3) = td.F_init.head(3) + td.vel_force_gain * (ts.init_point_vel - targ_dir_vel) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        break;
+                    } //end case MOVE_POS
+                    case(MOVE_ROT):{
+                        double targ_dir_w = ts.world_ori_targ_dir.dot(filtered_screw[ee_name].tail(3));
+                        ts.F_now.tail(3) = td.F_init.tail(3) + td.w_force_gain * (ts.init_point_w - targ_dir_w) * ts.world_ori_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        break;
+                    } //end case MOVE_ROT
+                    case(MOVE_POSROT):{
+                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
+                        ts.F_now.head(3) = td.F_init.head(3) + td.vel_force_gain * (ts.init_point_vel - targ_dir_vel) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
+                        if(targ_dir_pos_ratio <= 0){
+                            targ_dir_pos_ratio = 0; //マイナスは入れない
+                        }
+                        hrp::dquaternion virtual_ori_target, virtual_ori_diff;
+                        safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
+                        safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
+                        ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec(); // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
+                        // std::cout << std::endl;
+                        // std::cout << ee_name << " Stable update: " << std::endl;
+                        // std::cout << "targ_dir_pos_ratio = " << targ_dir_pos_ratio << std::endl;
+                        // std::cout << "initial_ori = " << ts.initial_ori.w() << " " << ts.initial_ori.vec().transpose() << std::endl;
+                        // std::cout << "world_ori_target = " << ts.world_ori_target.w() << " " << ts.world_ori_target.vec().transpose() << std::endl;
+                        // std::cout << "virtual_ori_target = " << virtual_ori_target.w() << " " << virtual_ori_target.vec().transpose() << std::endl;
+                        // std::cout << "act_eequat = " << act_eequat[ee_name].w() << " " << act_eequat[ee_name].vec().transpose() << std::endl;
+                        // std::cout << "virtual_ori_diff = " << virtual_ori_diff.w() << " " << virtual_ori_diff.vec() << std::endl;
+                        break;
+                    } //end case MOVE_POSROT
+                    case(FIX):
+                        break; //do nothing
+                    } //end switch task type
+                }
+            } //end if MANIP_CONTACT
+        } //end if param is active
+        it++;
+    }
+}
+
+void LimbTorqueController::ModeSelector()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    bool change_to_contact = false; //for two arms
+    bool change_to_emergency = false; //for two arms
+    bool change_to_idle = false; //for two arms
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            if(fix_mode_normal[ee_name]){
+                param.amode = IDLE_NORMAL;
+                if(loop%300==0){
+                    std::cout << "ee = " << ee_name << std::endl;
+                    std::cout << "      [ltc] MODE: IDLE_NORMAL... fixed by setting call startModeChange if you want to release" << std::endl;
+                }
+            } else{
+                TaskDescription& td = limb_task_target[ee_name];
+                TaskState&  ts = limb_task_state[ee_name];
+                switch(param.amode){
+                case(IDLE_NORMAL):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: IDLE_NORMAL" << std::endl;
+                    }
+                    if(ts.pos_over_limit || ts.ori_over_limit){
+                        if(ts.pos_over_limit){
+                            for (int i=0; i<100; i++){
+                                std::cout << "change to IDLE_HARD because of position!!!!!" << std::endl;
+                            }
+                        }
+                        if(ts.ori_over_limit){
+                            for (int i=0; i<100; i++){
+                                std::cout << "change to IDLE_HARD because of orientation!!!!!" << std::endl;
+                            }
+                        }
+                        param.amode = IDLE_HARD;
+                        reset_taskstate_bool(ts);
+                    }else if(ts.vel_over_limit){
+                        for (int i=0; i<100; i++){
+                            std::cout << "change to IDLE_COMPLIANT because of velocity!!!!!" << std::endl;
+                        }
+                        param.amode = IDLE_COMPLIANT;
+                        reset_taskstate_bool(ts);
+                    }
+                    break;
+                case(IDLE_COMPLIANT):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: IDLE_COMPLIANT" << std::endl;
+                    }
+                    if(ts.pos_over_limit || ts.ori_over_limit){
+                        param.amode = IDLE_HARD;
+                        reset_taskstate_bool(ts);
+                    }else if(ts.vel_over_thresh){
+                        param.amode = IDLE_NORMAL;
+                        reset_taskstate_bool(ts);
+                    }
+                    //TODO: make recovery from compliant mode...position and velocity check?
+                    break;
+                case(IDLE_HARD):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: IDLE_HARD" << std::endl;
+                    }
+                    if(ts.vel_over_thresh){
+                        param.amode = IDLE_NORMAL;
+                        reset_taskstate_bool(ts);
+                    }
+                    //TODO: make recovery from HARD mode...position check?
+                    break;
+                case(MANIP_FREE):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: MANIP_FREE" << std::endl;
+                    }
+                    if(ts.vel_over_limit || ts.pos_over_limit || ts.ori_over_limit){
+                        if(td.dual){
+                            change_to_emergency = true;
+                        }else{
+                            param.amode = EMERGENCY;
+                            reset_taskstate_bool(ts);
+                            ts.initial_pos = act_eepos[ee_name];
+                            ts.initial_ori = act_eequat[ee_name];
+                            ts.em_transition_count = ts.max_em_t_count;
+                            ts.F_em_init = ts.F_now;
+                            for(int i=0; i<param.manip->numJoints(); i++){
+                                ts.emergency_q(i) = param.manip->joint(i)->q;
+                            }
+                            ts.F_eeR = act_eeR[ee_name]; //use actual
+                        }
+                        // ts.vel_over_limit = false;
+                        // ts.pos_over_limit = false;
+                        // ts.ori_over_limit = false;
+                    }else if(ts.vel_over_thresh){
+                        for(int i=0; i<100; i++){
+                            std::cout << ee_name << ": ";
+                            std::cout << "Transition to CONTACT!!!!!!!!" << std::endl;
+                        }
+                        if(td.dual){
+                            change_to_contact = true;
+                        }else{
+                            param.amode = MANIP_CONTACT;
+                            reset_taskstate_bool(ts);
+                            ts.initial_pos = act_eepos[ee_name];
+                            ts.initial_ori = act_eequat[ee_name];
+                            ts.world_pos_target = ref_eeR[ee_name] * limb_task_target[ee_name].rel_pos_target + ref_eepos[ee_name];
+                            ts.world_ori_target = limb_task_target[ee_name].rel_ori_target * ref_eequat[ee_name]; //TODO: check if this calculation is correct
+                            ts.world_pos_targ_dir = (ref_eeR[ee_name] * limb_task_target[ee_name].rel_pos_target).normalized();
+                            ts.world_ori_targ_dir = hrp::rpyFromRot(limb_task_target[ee_name].rel_ori_target.toRotationMatrix()).normalized();
+                            ts.f2c_transition_count = ts.max_f2c_t_count;
+                            // TODO: is this OK?
+                            for(int i=0; i<param.manip->numJoints(); i++){
+                                ts.emergency_q(i) = param.manip->joint(i)->q;
+                            }
+                            ts.F_eeR = ref_eeR[ee_name];
+                        }
+                        //ts.vel_over_thresh = false;
+                    }
+                    break;
+                case(MANIP_CONTACT):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: MANIP_CONTACT" << std::endl;
+                    }
+                    if(ts.torque_over_limit || ts.pos_over_limit || ts.ori_over_limit || ts.vel_over_limit){
+                        if(ts.torque_over_limit){
+                            for(int i=0; i<100; i++){
+                                std::cout << "GOTO EMERGENCY because of torque limit!!!" << std::endl;
+                            }
+                        }
+                        if(ts.pos_over_limit){
+                            for(int i=0; i<100; i++){
+                                std::cout << "GOTO EMERGENCY because of position limit!!!" << std::endl;
+                            }
+                        }
+                        if(ts.ori_over_limit){
+                            for(int i=0; i<100; i++){
+                                std::cout << "GOTO EMERGENCY because of orientation limit!!!" << std::endl;
+                            }
+                        }
+                        if(ts.vel_over_limit){
+                            for(int i=0; i<100; i++){
+                                std::cout << "GOTO EMERGENCY because of velocity limit!!!" << std::endl;
+                            }
+                        }
+                        if(td.dual){
+                            change_to_emergency = true;
+                        }else{
+                            param.amode = EMERGENCY;
+                            reset_taskstate_bool(ts);
+                            ts.initial_pos = act_eepos[ee_name];
+                            ts.initial_ori = act_eequat[ee_name];
+                            ts.em_transition_count = ts.max_em_t_count;
+                            ts.F_em_init = ts.F_now;
+                            for(int i=0; i<param.manip->numJoints(); i++){
+                                ts.emergency_q(i) = param.manip->joint(i)->q;
+                            }
+                        }
+                        // ts.torque_over_limit = false;
+                        // ts.pos_over_limit = false;
+                        // ts.vel_over_limit = false;
+                    }else if(ts.pos_reach_target){
+                        if(td.type == MOVE_POS){
+                            for(int i=0; i<100; i++){
+                                std::cout << ee_name << ": ";
+                                std::cout << "Reach Task Goal!!!!!!!!" << std::endl;
+                            }
+                            if(td.dual){
+                                change_to_emergency = true; //TODO: concider abount this
+                            }else{
+                                param.amode = EMERGENCY;
+                                reset_taskstate_bool(ts);
+                                ts.initial_pos = act_eepos[ee_name];
+                                ts.initial_ori = act_eequat[ee_name];
+                                ts.em_transition_count = ts.max_em_t_count;
+                                ts.F_em_init = ts.F_now;
+                                for(int i=0; i<param.manip->numJoints(); i++){
+                                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                                }
+                            }
+                        }else if((td.type == MOVE_POSROT || td.type == MOVE_ROT) && ts.ori_reach_target){
+                            for(int i=0; i<100; i++){
+                                std::cout << ee_name << ": ";
+                                std::cout << "Reach Task Goal!!!!!!!!" << std::endl;
+                            }
+                            if(td.dual){
+                                change_to_emergency = true; //TODO: concider abount this
+                            }else{
+                                param.amode = EMERGENCY;
+                                reset_taskstate_bool(ts);
+                                ts.initial_pos = act_eepos[ee_name];
+                                ts.initial_ori = act_eequat[ee_name];
+                                ts.em_transition_count = ts.max_em_t_count;
+                                ts.F_em_init = ts.F_now;
+                                for(int i=0; i<param.manip->numJoints(); i++){
+                                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                                }
+                            }
+                        }
+                        //ts.pos_reach_target = false; //reach_targetはeusが見る
+                    }
+                    break;
+                case(EMERGENCY):
+                    if(loop%300==0){
+                        std::cout << "      [ltc] MODE: EMERGENCY" << std::endl;
+                    }
+                    //TODO: make recovery from emregency mode...velocity check?
+                    if(ts.em_transition_count <= 0){
+                        //eusからの指令待機
+                        if (release_emergency_called[ee_name]){
+                            if(td.dual){
+                                change_to_idle = true;
+                            }else{
+                                param.amode = IDLE_NORMAL;
+                                ts.initial_pos = act_eepos[ee_name];
+                                ts.initial_ori = act_eequat[ee_name];
+                                ts.F_now = hrp::dvector::Zero(6);
+                                reset_taskstate_bool(ts);
+                                release_emergency_called[ee_name] = false;
+                            }
+                        }
+                    }
+                    break;
+                }
+            } //end else
+        } //end if param.active
+        it++;
+    }
+    it = m_lt_param.begin();
+    // for dual arm task
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active && !fix_mode_normal[ee_name]) {
+            TaskDescription& td = limb_task_target[ee_name];
+            TaskState& ts = limb_task_state[ee_name];
+            if(change_to_contact){
+                param.amode = MANIP_CONTACT;
+                reset_taskstate_bool(ts);
+                ts.initial_pos = act_eepos[ee_name];
+                ts.initial_ori = act_eequat[ee_name];
+                ts.world_pos_target = ref_eeR[ee_name] * td.rel_pos_target + ref_eepos[ee_name];
+                ts.world_ori_target = td.rel_ori_target * ref_eequat[ee_name]; //TODO: check if this calculation is correct
+                ts.world_pos_targ_dir = (ref_eeR[ee_name] * td.rel_pos_target).normalized();
+                ts.world_ori_targ_dir = hrp::rpyFromRot(td.rel_ori_target.toRotationMatrix()).normalized();
+                ts.f2c_transition_count = ts.max_f2c_t_count;
+                // TODO: is this OK?
+                for(int i=0; i<param.manip->numJoints(); i++){
+                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                }
+                ts.F_eeR = ref_eeR[ee_name];
+            }else if(change_to_emergency){
+                if(param.amode == MANIP_FREE){
+                    ts.F_eeR = act_eeR[ee_name];
+                }
+                reset_taskstate_bool(ts);
+                ts.initial_pos = act_eepos[ee_name];
+                ts.initial_ori = act_eequat[ee_name];
+                ts.em_transition_count = ts.max_em_t_count;
+                ts.F_em_init = ts.F_now;
+                for(int i=0; i<param.manip->numJoints(); i++){
+                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                }
+                param.amode = EMERGENCY;
+            }else if(change_to_idle){
+                param.amode = IDLE_NORMAL;
+                ts.initial_pos = act_eepos[ee_name];
+                ts.initial_ori = act_eequat[ee_name];
+                ts.F_now = hrp::dvector::Zero(6);
+                release_emergency_called[ee_name] = false;
+                reset_taskstate_bool(ts);
             }
         }
         it++;
     }
-    reference_torque = invdyn_accvel_tq + invdyn_grav_tq + eecomp_tq + nullspace_tq;
 }
 
 void LimbTorqueController::DebugOutput()
@@ -1484,7 +2210,6 @@ void LimbTorqueController::DebugOutput()
         while (it != m_lt_param.end()){
             LTParam& param = it->second;
             std::string ee_name = it->first;
-            CollisionParam& col_param = m_lt_col_param[ee_name];
             if (param.is_active) {
                 hrp::JointPathExPtr manip = param.manip;
                 int limbdof = manip->numJoints();
@@ -1525,6 +2250,14 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteewrench[ee_name]) << micro_time;
                     *(debug_vel_discrepancy[ee_name]) << micro_time;
                     *(debug_force_inc[ee_name]) << micro_time;
+                    *(debug_cdve[ee_name]) << micro_time;
+                    *(debug_odve[ee_name]) << micro_time;
+                    *(debug_dtt[ee_name]) << micro_time;
+                    *(debug_pen[ee_name]) << micro_time;
+                    *(debug_pdtt[ee_name]) << micro_time;
+                    *(debug_ppen[ee_name]) << micro_time;
+                    *(debug_tdqw[ee_name]) << micro_time;
+                    *(debug_udqw[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -1571,7 +2304,7 @@ void LimbTorqueController::DebugOutput()
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
                         *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
-                        *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
+                        // *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
                         *(debug_force_inc[ee_name]) << " " << force_increase[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
@@ -1588,6 +2321,14 @@ void LimbTorqueController::DebugOutput()
                         *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
                         *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
                     }
+                    *(debug_cdve[ee_name]) << " " << check_dir_vel_err[ee_name];
+                    *(debug_odve[ee_name]) << " " << other_dir_vel_err[ee_name];
+                    *(debug_dtt[ee_name]) << " " << dist_to_target[ee_name];
+                    *(debug_pen[ee_name]) << " " << pos_error_norm[ee_name];
+                    *(debug_pdtt[ee_name]) << " " << pdist_to_target[ee_name];
+                    *(debug_ppen[ee_name]) << " " << ppos_error_norm[ee_name];
+                    *(debug_tdqw[ee_name]) << " " << target_dir_quatdiffw[ee_name];
+                    *(debug_udqw[ee_name]) <<  " " << unwanted_dir_quatdiffw[ee_name];
                     *(debug_ee_pocw[ee_name]) << std::endl;
                     *(debug_ee_vwcw[ee_name]) << std::endl;
                     *(debug_eect[ee_name]) << std::endl;
@@ -1612,6 +2353,14 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteewrench[ee_name]) << std::endl;
                     *(debug_vel_discrepancy[ee_name]) << std::endl;
                     *(debug_force_inc[ee_name]) << std::endl;
+                    *(debug_cdve[ee_name]) << std::endl;
+                    *(debug_odve[ee_name]) << std::endl;
+                    *(debug_dtt[ee_name]) << std::endl;
+                    *(debug_pen[ee_name]) << std::endl;
+                    *(debug_pdtt[ee_name]) << std::endl;
+                    *(debug_ppen[ee_name]) << std::endl;
+                    *(debug_tdqw[ee_name]) << std::endl;
+                    *(debug_udqw[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -1683,6 +2432,21 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
         hrp::dmatrix concatenated_dgain = ee_dgain_vec.asDiagonal();  //just for print
 
+        switch(i_param_.amode){
+        case OpenHRP::LimbTorqueControllerService::IDLE_NORMAL:
+            m_lt_param[name].amode = IDLE_NORMAL;
+        case OpenHRP::LimbTorqueControllerService::IDLE_HARD:
+            m_lt_param[name].amode = IDLE_HARD;
+        case OpenHRP::LimbTorqueControllerService::IDLE_COMPLIANT:
+            m_lt_param[name].amode = IDLE_COMPLIANT;
+        case OpenHRP::LimbTorqueControllerService::MANIP_FREE:
+            m_lt_param[name].amode = MANIP_FREE;
+        case OpenHRP::LimbTorqueControllerService::MANIP_CONTACT:
+            m_lt_param[name].amode = MANIP_CONTACT;
+        case OpenHRP::LimbTorqueControllerService::EMERGENCY:
+            m_lt_param[name].amode = EMERGENCY;
+        }
+
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;
@@ -1703,10 +2467,26 @@ void LimbTorqueController::copyLimbTorqueControllerParam(LimbTorqueControllerSer
         i_param_.ee_dgain[i+3] = param.ee_dgain_r(i,i);
     }
 
+    // Controller mode
     if (param.is_active) i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_ACTIVE;
     else i_param_.controller_mode = OpenHRP::LimbTorqueControllerService::MODE_IDLE;
-}
 
+    // Arm mode
+    switch(param.amode){
+    case 0:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::IDLE_NORMAL;
+    case 1:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::IDLE_HARD;
+    case 2:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::IDLE_COMPLIANT;
+    case 3:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::MANIP_FREE;
+    case 4:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::MANIP_CONTACT;
+    case 5:
+        i_param_.amode = OpenHRP::LimbTorqueControllerService::EMERGENCY;
+    }
+}
 
 bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_name_, LimbTorqueControllerService::limbtorqueParam& i_param_)
 {
@@ -1854,29 +2634,20 @@ bool LimbTorqueController::stopRefdqEstimation(const std::string& i_name_)
     return true;
 }
 
-bool LimbTorqueController::startDisturbanceObserver(const std::string& i_name_)
+bool LimbTorqueController::releaseEmergency(const std::string& i_name_, bool cancel)
 {
     Guard guard(m_mutex);
     std::string name = std::string(i_name_);
     if ( m_lt_param.find(name) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector named [" << name << "]" << std::endl;
         return false;
     }
-    observe_disturbance[name] = true;
-    std::cout << "[ltc] start disturbance observer!!" << std::endl;
-    return true;
-}
-
-bool LimbTorqueController::stopDisturbanceObserver(const std::string& i_name_)
-{
-    Guard guard(m_mutex);
-    std::string name = std::string(i_name_);
-    if ( m_lt_param.find(name) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
-        return false;
+    if(cancel){
+        release_emergency_called[name] = false;
+    }else{
+        release_emergency_called[name] = true;
     }
-    observe_disturbance[name] = false;
-    std::cout << "[ltc] stop disturbance observer!!" << std::endl;
+    std::cout << "[ltc] release emergency mode!!" << std::endl;
     return true;
 }
 
@@ -1933,6 +2704,15 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
                 debug_vel_discrepancy[ee_name] = new std::ofstream((logpath  + std::string("vel_discrepancy.dat")).c_str());
                 debug_force_inc[ee_name] = new std::ofstream((logpath  + std::string("force_increase.dat")).c_str());
+                debug_cdve[ee_name] = new std::ofstream((logpath + std::string("cdve.dat")).c_str());
+                debug_odve[ee_name] = new std::ofstream((logpath + std::string("odve.dat")).c_str());
+                debug_dtt[ee_name] = new std::ofstream((logpath + std::string("dtt.dat")).c_str());
+                debug_pen[ee_name] = new std::ofstream((logpath + std::string("pen.dat")).c_str());
+
+                debug_pdtt[ee_name] = new std::ofstream((logpath + std::string("pdtt.dat")).c_str());
+                debug_ppen[ee_name] = new std::ofstream((logpath + std::string("ppen.dat")).c_str());
+                debug_tdqw[ee_name] = new std::ofstream((logpath + std::string("tdqw.dat")).c_str());
+                debug_udqw[ee_name] = new std::ofstream((logpath + std::string("udqw.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -1991,6 +2771,14 @@ bool LimbTorqueController::stopLog()
                 delete debug_esteewrench[ee_name];
                 delete debug_vel_discrepancy[ee_name];
                 delete debug_force_inc[ee_name];
+                delete debug_cdve[ee_name];
+                delete debug_odve[ee_name];
+                delete debug_dtt[ee_name];
+                delete debug_pen[ee_name];
+                delete debug_pdtt[ee_name];
+                delete debug_ppen[ee_name];
+                delete debug_tdqw[ee_name];
+                delete debug_udqw[ee_name];
             }
         }
         it++;
@@ -1999,8 +2787,7 @@ bool LimbTorqueController::stopLog()
     return true;
 }
 
-// test for reference torque regulator
-bool LimbTorqueController::startLTCEmergency(const std::string& i_name_)
+bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription task_description)
 {
     Guard guard(m_mutex);
     std::string name = std::string(i_name_);
@@ -2008,23 +2795,189 @@ bool LimbTorqueController::startLTCEmergency(const std::string& i_name_)
         std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
         return false;
     }
-    disturbance_detected[name] = true;
-    disturbance_uncheck_count[name] = max_disturbance_uncheck_count;
-    std::cout << "[ltc] start emergency mode!!" << std::endl;
+    switch(task_description.type){
+    case(MOVE_POS):
+        limb_task_target[name].type = MOVE_POS;
+        break;
+    case(MOVE_ROT):
+        limb_task_target[name].type = MOVE_ROT;
+        break;
+    case(MOVE_POSROT):
+        limb_task_target[name].type = MOVE_POSROT;
+        break;
+    case(FIX):
+        limb_task_target[name].type = FIX;
+        break;
+    default:
+        break;
+    }
+    limb_task_target[name].dual = task_description.dual;
+    // set task descriptions
+    for(int i=0; i<3; i++){
+        limb_task_target[name].velocity_check_dir(i) = task_description.velocity_check_dir[i];
+        limb_task_target[name].rel_pos_target(i) = task_description.rel_pos_target[i];
+    }
+    limb_task_target[name].velocity_check_dir.normalize();
+    for(int i=0; i<6; i++){
+        limb_task_target[name].F_init(i) = task_description.F_init[i];
+    }
+    limb_task_target[name].rel_ori_target = hrp::dquaternion(task_description.rel_ori_target[0], task_description.rel_ori_target[1], task_description.rel_ori_target[2], task_description.rel_ori_target[3]);
+    limb_task_target[name].vel_check_thresh = task_description.vel_check_thresh;
+    limb_task_target[name].vel_check_limit = task_description.vel_check_limit;
+    limb_task_target[name].cont_vel_error_limit = task_description.cont_vel_error_limit;
+    limb_task_target[name].cont_w_error_limit = task_description.cont_w_error_limit;
+    limb_task_target[name].pos_target_thresh = task_description.pos_target_thresh;
+    limb_task_target[name].pos_error_limit = task_description.pos_error_limit;
+    limb_task_target[name].ori_target_thresh = task_description.ori_target_thresh;
+    limb_task_target[name].ori_error_limit = task_description.ori_error_limit;
+    // initialize task state
+    reset_taskstate_bool(limb_task_state[name]);
+    m_lt_param[name].amode = MANIP_FREE; //automatically set to manip_normal (is this ok?)
+    std::cout << "[" << m_profile.instance_name << "] successfully set task description for " << name << std::endl;
     return true;
 }
 
-bool LimbTorqueController::stopLTCEmergency(const std::string& i_name_)
+void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerService::taskDescription& i_taskd_, const TaskDescription& param)
+{
+    switch(param.type){
+    case(MOVE_POS):
+        i_taskd_.type = OpenHRP::LimbTorqueControllerService::MOVE_POS;
+    case(MOVE_ROT):
+        i_taskd_.type = OpenHRP::LimbTorqueControllerService::MOVE_ROT;
+    case(MOVE_POSROT):
+        i_taskd_.type = OpenHRP::LimbTorqueControllerService::MOVE_POSROT;
+    case(FIX):
+        i_taskd_.type = OpenHRP::LimbTorqueControllerService::FIX;
+    }
+    i_taskd_.dual = param.dual;
+    i_taskd_.vel_force_gain = param.vel_force_gain;
+    i_taskd_.w_force_gain = param.w_force_gain;
+    i_taskd_.vel_check_thresh = param.vel_check_thresh;
+    i_taskd_.vel_check_limit = param.vel_check_limit;
+    i_taskd_.cont_vel_error_limit = param.cont_vel_error_limit;
+    i_taskd_.cont_w_error_limit = param.cont_w_error_limit;
+    i_taskd_.pos_target_thresh = param.pos_target_thresh;
+    i_taskd_.pos_error_limit = param.pos_error_limit;
+    i_taskd_.ori_target_thresh = param.ori_target_thresh;
+    i_taskd_.ori_error_limit = param.ori_error_limit;
+    i_taskd_.rel_ori_target[0] = param.rel_ori_target.w();
+    for(int i=0; i<3; i++){
+        i_taskd_.velocity_check_dir[i] = param.velocity_check_dir(i);
+        i_taskd_.rel_pos_target[i] = param.rel_pos_target(i);
+        i_taskd_.rel_ori_target[i+1] = param.rel_ori_target.vec()(i);
+        std::cout << "param.rel_ori_target.vec()(" << i << ") = " << param.rel_ori_target.vec()(i) << std::endl;
+        std::cout << "i_taskd_.rel_ori_target[" << i+1 << "] = " << i_taskd_.rel_ori_target[i+1] << std::endl;
+    }
+    for(int i=0; i<6; i++){
+        i_taskd_.F_init[i] = param.F_init(i);
+    }
+}
+
+bool LimbTorqueController::getTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_)
+{
+    std::string name = std::string(i_name_);
+    if ( m_lt_param.find(i_name_) == m_lt_param.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find task description [" << i_name_ << "]" << std::endl;
+        i_taskd_ = new OpenHRP::LimbTorqueControllerService::taskDescription();
+        copyTaskDescription(*i_taskd_, TaskDescription());
+        return false;
+    }
+    i_taskd_ = new OpenHRP::LimbTorqueControllerService::taskDescription();
+    i_taskd_->velocity_check_dir.length(3);
+    i_taskd_->F_init.length(6);
+    i_taskd_->rel_pos_target.length(3);
+    i_taskd_->rel_ori_target.length(4);
+    copyTaskDescription(*i_taskd_, limb_task_target[name]);
+    return true;
+}
+
+void LimbTorqueController::copyTaskState(OpenHRP::LimbTorqueControllerService::taskState& i_tasks_, const TaskState& param)
+{
+    i_tasks_.pos_over_limit = param.pos_over_limit;
+    i_tasks_.pos_reach_target = param.pos_reach_target;
+    i_tasks_.ori_over_limit = param.ori_over_limit;
+    i_tasks_.ori_reach_target = param.ori_reach_target;
+    i_tasks_.vel_over_thresh = param.vel_over_thresh;
+    i_tasks_.vel_over_limit = param.vel_over_limit;
+    i_tasks_.w_over_limit = param.w_over_limit;
+    i_tasks_.torque_over_limit = param.torque_over_limit;
+    i_tasks_.f2c_transition_count = param.f2c_transition_count;
+    i_tasks_.max_f2c_t_count = param.max_f2c_t_count;
+    i_tasks_.em_transition_count = param.em_transition_count;
+    i_tasks_.max_em_t_count = param.max_em_t_count;
+    i_tasks_.init_point_vel = param.init_point_vel;
+    i_tasks_.init_point_w = param.init_point_w;
+    i_tasks_.world_ori_target[0] = param.world_ori_target.w();
+    i_tasks_.initial_ori[0] = param.initial_ori.w();
+    for(int i=0; i<3; i++){
+        i_tasks_.world_pos_target[i] = param.world_pos_target(i);
+        i_tasks_.world_pos_targ_dir[i] = param.world_pos_targ_dir(i);
+        i_tasks_.world_ori_targ_dir[i] = param.world_ori_targ_dir(i);
+        i_tasks_.initial_pos[i] = param.initial_pos(i);
+        i_tasks_.world_ori_target[i+1] = param.world_ori_target.vec()(i);
+        i_tasks_.initial_ori[i+1] = param.initial_ori.vec()(i);
+        for(int j=0; j<3; j++){
+            i_tasks_.F_eeR[i*3+j] = param.F_eeR(i, j);
+        }
+    }
+    for(int i=0; i<6; i++){
+        i_tasks_.F_now[i] = param.F_now(i);
+        i_tasks_.F_em_init[i] = param.F_em_init(i);
+    }
+    for(int i=0; i<param.emergency_q.size(); i++){
+        i_tasks_.emergency_q[i] = param.emergency_q(i);
+    }
+}
+
+bool LimbTorqueController::getTaskState(const std::string &i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_)
+{
+    std::string name = std::string(i_name_);
+    if ( limb_task_state.find(i_name_) == limb_task_state.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find task state [" << i_name_ << "]" << std::endl;
+        i_tasks_ = new OpenHRP::LimbTorqueControllerService::taskState();
+        copyTaskState(*i_tasks_, TaskState());
+        return false;
+    }
+    i_tasks_ = new OpenHRP::LimbTorqueControllerService::taskState();
+    i_tasks_->world_pos_target.length(3);
+    i_tasks_->world_pos_targ_dir.length(3);
+    i_tasks_->world_ori_targ_dir.length(3);
+    i_tasks_->initial_pos.length(3);
+    i_tasks_->world_ori_target.length(4);
+    i_tasks_->F_em_init.length(6);
+    i_tasks_->F_now.length(6);
+    i_tasks_->initial_ori.length(4);
+    i_tasks_->F_eeR.length(9);
+    i_tasks_->emergency_q.length(m_lt_param[name].manip->numJoints());
+    copyTaskState(*i_tasks_, limb_task_state[name]);
+    return true;
+}
+
+bool LimbTorqueController::startModeChange(const std::string &i_name_)
 {
     Guard guard(m_mutex);
     std::string name = std::string(i_name_);
-    if ( m_lt_param.find(name) == m_lt_param.end() ) {
-        std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
+    if ( limb_task_state.find(i_name_) == limb_task_state.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector [" << i_name_ << "]" << std::endl;
         return false;
     }
-    disturbance_detected[name] = false;
-    disturbance_uncheck_count[name] = 0;
-    std::cout << "[ltc] stop emergency mode!!" << std::endl;
+    fix_mode_normal[name] = false;
+    reset_taskstate_bool(limb_task_state[name]);
+    std::cout << "[" << m_profile.instance_name << "] Start watching error and changing mode for " << i_name_ << "!" << std::endl;
+    return true;
+}
+
+bool LimbTorqueController::stopModeChange(const std::string &i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if ( limb_task_state.find(i_name_) == limb_task_state.end() ) {
+        std::cerr << "[" << m_profile.instance_name << "] Could not find end effector [" << i_name_ << "]" << std::endl;
+        return false;
+    }
+    fix_mode_normal[name] = true;
+    reset_taskstate_bool(limb_task_state[name]);
+    std::cout << "[" << m_profile.instance_name << "] Stop watching error and changing mode for " << i_name_ << "!" << std::endl;
     return true;
 }
 
@@ -2038,3 +2991,39 @@ extern "C"
                                  RTC::Delete<LimbTorqueController>);
     }
 };
+
+// Do not use this for now: it is not compatible with reference torque regulator for now
+void LimbTorqueController::calcMinMaxAvoidanceTorque()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            hrp::JointPathExPtr manip = param.manip;
+            double margin = deg2rad(4.0);
+            for ( size_t i = 0; i < manip->numJoints(); ++i ) {
+                double now_angle = manip->joint(i)->q;
+                double max_angle = manip->joint(i)->ulimit;
+                double min_angle = manip->joint(i)->llimit;
+                if ( (now_angle+margin) >= max_angle ) {
+                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                    double avoid_torque = - max_torque/margin*(now_angle - (max_angle-margin));
+                    manip->joint(i)->u = std::min(manip->joint(i)->u, avoid_torque);
+                    if (loop%500 == 0){
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "max=" << rad2deg(max_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
+                }else if ( (now_angle-margin) <= min_angle) {
+                    double max_torque = manip->joint(i)->climit * manip->joint(i)->gearRatio * manip->joint(i)->torqueConst;
+                    double avoid_torque = max_torque/margin*(min_angle+margin - now_angle);
+                    manip->joint(i)->u = std::max(manip->joint(i)->u, avoid_torque);
+                    if (loop%200 == 0){
+                        std::cout << "!!MinMax Angle Warning!!" << "[" << m_profile.instance_name << "] " << manip->joint(i)->name << " is near limit: " << "min=" << rad2deg(min_angle) << ", now=" << rad2deg(now_angle) << ", applying min/max avoidance torque." << std::endl;}
+                }
+            }
+        }
+        ++it;
+    }
+}

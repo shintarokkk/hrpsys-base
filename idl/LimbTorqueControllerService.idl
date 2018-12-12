@@ -84,6 +84,7 @@ module OpenHRP
         DblSequence F_init;
         double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
         double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
+        double time_force_gain; //F_now += time_force_gain*(t_now - t_init)
         DblSequence3 rel_pos_target;
         DblSequence rel_ori_target; //quaternion in vector4
         double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT
@@ -119,6 +120,7 @@ module OpenHRP
         long max_f2c_t_count; //maximum value of f2c_transition_count
         long em_transition_count; //transition from EMERGENCY to IDLE_NORMAL
         long max_em_t_count; //maximum value of em_transition_count
+        long rfu_count; //count of loop of reference force update, starting at the end of transition
         DblSequence F_em_init; //F_now at the moment of emergency transition
         double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
         DblSequence3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition

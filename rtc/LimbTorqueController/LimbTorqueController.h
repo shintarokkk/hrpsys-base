@@ -181,6 +181,7 @@ private:
         hrp::dvector F_init; //initial reference force
         double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
         double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
+        double time_force_gain; //F_now += time_force_gain*(t_now - t_init)
         hrp::Vector3 rel_pos_target; //position target relative to initial state //in ee local at initial state
         hrp::dquaternion rel_ori_target; //orientation target relative to initial state //in ee local at initial state
         // targetのpos_reach_thresh mm、ori_error_thresh degに手先が近づいたら目標達成とする
@@ -216,6 +217,7 @@ private:
         int max_f2c_t_count; //maximum value of f2c_transition_count
         int em_transition_count; //transition to EMERGENCY: releaving reference force
         int max_em_t_count; //maximum value of em_transition_count
+        int rfu_count; //count of loop of reference force update, starting at the end of transition
         hrp::dvector F_em_init; //F_now at the moment of emergency transition
         double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
@@ -408,6 +410,7 @@ private:
         _ts.torque_over_limit = false;
         _ts.em_transition_count = 0;
         _ts.f2c_transition_count = 0;
+        _ts.rfu_count = 0;
     }
 
     // temporary setting these global for debugging

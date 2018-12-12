@@ -387,6 +387,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         td.F_init = hrp::dvector::Zero(6);
         td.vel_force_gain = 10.0;
         td.w_force_gain = 0.0;
+        td.time_force_gain = 30; // N / s
         td.rel_pos_target = hrp::Vector3::Zero();
         td.rel_ori_target = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
         td.vel_check_thresh = 0.3;
@@ -416,6 +417,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.max_f2c_t_count = 500;
         ts.em_transition_count = 0;
         ts.max_em_t_count = 300;
+        ts.rfu_count = 0;
         ts.F_em_init.resize(6);
         ts.init_point_vel = 0.0;
         ts.init_point_w = 0.0;
@@ -1891,7 +1893,8 @@ void LimbTorqueController::ReferenceForceUpdater()
                     switch(td.type){
                     case(MOVE_POS):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
-                        ts.F_now.head(3) = td.F_init.head(3) + td.vel_force_gain * (ts.init_point_vel - targ_dir_vel) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        ts.rfu_count += 1; //count up
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.time_force_gain * ts.rfu_count * RTC_PERIOD +  td.vel_force_gain * (ts.init_point_vel - targ_dir_vel)) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
                         break;
                     } //end case MOVE_POS
                     case(MOVE_ROT):{
@@ -1901,7 +1904,8 @@ void LimbTorqueController::ReferenceForceUpdater()
                     } //end case MOVE_ROT
                     case(MOVE_POSROT):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
-                        ts.F_now.head(3) = td.F_init.head(3) + td.vel_force_gain * (ts.init_point_vel - targ_dir_vel) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        ts.rfu_count += 1; //count up
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.time_force_gain * ts.rfu_count * RTC_PERIOD +  td.vel_force_gain * (ts.init_point_vel - targ_dir_vel)) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
                         double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
                         if(targ_dir_pos_ratio <= 0){
                             targ_dir_pos_ratio = 0; //マイナスは入れない

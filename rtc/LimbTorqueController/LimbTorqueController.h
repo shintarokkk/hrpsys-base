@@ -128,6 +128,8 @@ protected:
     RTC::InPort<RTC::TimedOrientation3D> m_baseRpyIn;
     std::vector<RTC::TimedDoubleSeq> m_force;
     std::vector<RTC::InPort<RTC::TimedDoubleSeq> *> m_forceIn;
+    std::vector<RTC::TimedDoubleSeq> m_ref_force;
+    std::vector<RTC::OutPort<RTC::TimedDoubleSeq> *> m_ref_forceOut;
     RTC::TimedOrientation3D m_rpy;
     RTC::InPort<RTC::TimedOrientation3D> m_rpyIn;
 
@@ -160,6 +162,7 @@ private:
         std::string target_name;
         hrp::Vector3 localPos;
         hrp::Matrix33 localR;
+        int ee_index;
     };
     struct CollisionParam{
         hrp::dvector collision_threshold;

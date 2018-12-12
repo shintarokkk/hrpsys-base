@@ -147,12 +147,22 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     unsigned int nforce  = npforce + nvforce;
     m_force.resize(nforce);
     m_forceIn.resize(nforce);
+    m_ref_force.resize(nforce);
+    m_ref_forceOut.resize(nforce);
     std::cerr << "[" << m_profile.instance_name << "] force sensor ports" << std::endl;
     for (unsigned int i=0; i<nforce; i++){
         // actual inport
         m_forceIn[i] = new RTC::InPort<RTC::TimedDoubleSeq>(fsensor_names[i].c_str(), m_force[i]);
         m_force[i].data.length(6);
         registerInPort(fsensor_names[i].c_str(), *m_forceIn[i]);
+        std::cerr << "[" << m_profile.instance_name << "]   name = " << fsensor_names[i] << std::endl;
+        // reference outport
+        m_ref_force[i].data.length(6);
+        for (unsigned int j=0; j<6; j++){
+            m_ref_force[i].data[j] = 0.0;
+        }
+        m_ref_forceOut[i] = new RTC::OutPort<RTC::TimedDoubleSeq>(std::string("ref_"+fsensor_names[i]+"Out").c_str(), m_ref_force[i]);
+        registerOutPort(std::string("ref_"+fsensor_names[i]+"Out").c_str(), *m_ref_forceOut[i]);
         std::cerr << "[" << m_profile.instance_name << "]   name = " << fsensor_names[i] << std::endl;
     }
 
@@ -215,6 +225,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
             }
             eet.localR = Eigen::AngleAxis<double>(tmpv[3], hrp::Vector3(tmpv[0], tmpv[1], tmpv[2])).toRotationMatrix(); // rotation in VRML is represented by axis + angle
             eet.target_name = ee_target;
+            eet.ee_index = i;
             default_pgain[i] = conf_pgain;
             default_dgain[i] = conf_dgain;
             default_cgain[i] = conf_cgain;
@@ -578,10 +589,6 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
         if ( m_forceIn[i]->isNew() ) {
             m_forceIn[i]->read();
         }
-        // TODO: add ref force
-        // if ( m_ref_forceIn[i]->isNew() ) {
-        //     m_ref_forceIn[i]->read();
-        // }
     }
     if (m_qCurrentIn.isNew()) {
         m_qCurrentIn.read();
@@ -657,6 +664,25 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
 
         m_qOut.write();
         m_tqOut.write();
+    }
+
+    // write ref_force
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        int arm_idx = ee_map[ee_name].ee_index;
+        if(param.is_active){
+            TaskState& ts = limb_task_state[ee_name];
+            hrp::Vector3 world_ref_force = ts.F_eeR * ts.F_now.head(3);
+            for(int i=0; i<3; i++){
+                m_ref_force[arm_idx].data[i] = world_ref_force[i];
+            }
+        }
+        // need to write tm? (does not seem to be used...)
+        m_ref_force[arm_idx].tm = m_qRef.tm;
+        m_ref_forceOut[arm_idx]->write();
+        it++;
     }
 
     if(spit_log){

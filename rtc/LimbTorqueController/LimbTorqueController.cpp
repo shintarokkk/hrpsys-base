@@ -387,7 +387,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         td.F_init = hrp::dvector::Zero(6);
         td.vel_force_gain = 10.0;
         td.w_force_gain = 0.0;
-        td.time_force_gain = 30; // N / s
         td.rel_pos_target = hrp::Vector3::Zero();
         td.rel_ori_target = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
         td.vel_check_thresh = 0.3;
@@ -1894,7 +1893,7 @@ void LimbTorqueController::ReferenceForceUpdater()
                     case(MOVE_POS):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
                         ts.rfu_count += 1; //count up
-                        ts.F_now.head(3) = td.F_init.head(3) + (td.time_force_gain * ts.rfu_count * RTC_PERIOD +  td.vel_force_gain * (ts.init_point_vel - targ_dir_vel)) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * ts.rfu_count * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         break;
                     } //end case MOVE_POS
                     case(MOVE_ROT):{
@@ -1905,7 +1904,7 @@ void LimbTorqueController::ReferenceForceUpdater()
                     case(MOVE_POSROT):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
                         ts.rfu_count += 1; //count up
-                        ts.F_now.head(3) = td.F_init.head(3) + (td.time_force_gain * ts.rfu_count * RTC_PERIOD +  td.vel_force_gain * (ts.init_point_vel - targ_dir_vel)) * ts.world_pos_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * ts.rfu_count * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
                         if(targ_dir_pos_ratio <= 0){
                             targ_dir_pos_ratio = 0; //マイナスは入れない
@@ -2817,13 +2816,16 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     }
     limb_task_target[name].dual = task_description.dual;
     // set task descriptions
+    limb_task_target[name].velocity_check_dir.normalize();
+    limb_task_target[name].target_velocity = task_description.target_velocity;
+    for(int i=0; i<6; i++){
+        limb_task_target[name].F_init(i) = task_description.F_init[i];
+    }
+    limb_task_target[name].vel_force_gain = task_description.vel_force_gain;
+    limb_task_target[name].w_force_gain = task_description.w_force_gain;
     for(int i=0; i<3; i++){
         limb_task_target[name].velocity_check_dir(i) = task_description.velocity_check_dir[i];
         limb_task_target[name].rel_pos_target(i) = task_description.rel_pos_target[i];
-    }
-    limb_task_target[name].velocity_check_dir.normalize();
-    for(int i=0; i<6; i++){
-        limb_task_target[name].F_init(i) = task_description.F_init[i];
     }
     limb_task_target[name].rel_ori_target = hrp::dquaternion(task_description.rel_ori_target[0], task_description.rel_ori_target[1], task_description.rel_ori_target[2], task_description.rel_ori_target[3]);
     limb_task_target[name].vel_check_thresh = task_description.vel_check_thresh;
@@ -2854,6 +2856,10 @@ void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerServ
         i_taskd_.type = OpenHRP::LimbTorqueControllerService::FIX;
     }
     i_taskd_.dual = param.dual;
+    i_taskd_.target_velocity = param.target_velocity;
+    for(int i=0; i<6; i++){
+        i_taskd_.F_init[i] = param.F_init(i);
+    }
     i_taskd_.vel_force_gain = param.vel_force_gain;
     i_taskd_.w_force_gain = param.w_force_gain;
     i_taskd_.vel_check_thresh = param.vel_check_thresh;
@@ -2871,9 +2877,6 @@ void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerServ
         i_taskd_.rel_ori_target[i+1] = param.rel_ori_target.vec()(i);
         std::cout << "param.rel_ori_target.vec()(" << i << ") = " << param.rel_ori_target.vec()(i) << std::endl;
         std::cout << "i_taskd_.rel_ori_target[" << i+1 << "] = " << i_taskd_.rel_ori_target[i+1] << std::endl;
-    }
-    for(int i=0; i<6; i++){
-        i_taskd_.F_init[i] = param.F_init(i);
     }
 }
 

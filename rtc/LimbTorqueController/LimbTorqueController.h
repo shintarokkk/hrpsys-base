@@ -178,10 +178,10 @@ private:
         task_target_type type;
         bool dual;
         hrp::Vector3 velocity_check_dir; //velocity error checking direction to transition to MANIP_CONTACT TODO: angular velocity もチェック?
+        double target_velocity; //target translational velocity during contact (projected onto target dir)
         hrp::dvector F_init; //initial reference force
         double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
         double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
-        double time_force_gain; //F_now += time_force_gain*(t_now - t_init)
         hrp::Vector3 rel_pos_target; //position target relative to initial state //in ee local at initial state
         hrp::dquaternion rel_ori_target; //orientation target relative to initial state //in ee local at initial state
         // targetのpos_reach_thresh mm、ori_error_thresh degに手先が近づいたら目標達成とする

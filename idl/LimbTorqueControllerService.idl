@@ -81,10 +81,10 @@ module OpenHRP
         TaskTargetType type;
         boolean dual;
         DblSequence3 velocity_check_dir;
+        double target_velocity; //target translational velocity during contact (projected onto target dir)
         DblSequence F_init;
         double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
         double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
-        double time_force_gain; //F_now += time_force_gain*(t_now - t_init)
         DblSequence3 rel_pos_target;
         DblSequence rel_ori_target; //quaternion in vector4
         double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT

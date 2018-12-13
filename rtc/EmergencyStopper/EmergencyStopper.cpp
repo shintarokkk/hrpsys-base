@@ -56,6 +56,7 @@ EmergencyStopper::EmergencyStopper(RTC::Manager* manager)
       // <rtc-template block="initializer">
       m_qRefIn("qRef", m_qRef),
       m_emergencySignalIn("emergencySignal", m_emergencySignal),
+      m_limbemergencySignalIn("limbemergencySignal", m_limbemergencySignal),
       m_servoStateIn("servoStateIn", m_servoState),
       m_qOut("q", m_q),
       m_emergencyModeOut("emergencyMode", m_emergencyMode),
@@ -89,6 +90,7 @@ RTC::ReturnCode_t EmergencyStopper::onInitialize()
     // Set InPort buffers
     addInPort("qRef", m_qRefIn);
     addInPort("emergencySignal", m_emergencySignalIn);
+    addInPort("limbemergencySignal", m_limbemergencySignalIn);
     addInPort("servoStateIn", m_servoStateIn);
 
     // Set OutPort buffer
@@ -340,6 +342,20 @@ RTC::ReturnCode_t EmergencyStopper::onExecute(RTC::UniqueId ec_id)
             Guard guard(m_mutex);
             std::cerr << "[" << m_profile.instance_name << "] [" << m_qRef.tm
                       << "] emergencySignal is set!" << std::endl;
+            is_stop_mode = true;
+        }
+    }
+    if (m_limbemergencySignalIn.isNew()){
+        m_limbemergencySignalIn.read();
+        if ( m_limbemergencySignal.data == 0 ) {
+            Guard guard(m_mutex);
+            std::cerr << "[" << m_profile.instance_name << "] [" << m_qRef.tm
+                      << "] emergencySignal from LimbTorqueController is reset!" << std::endl;
+            is_stop_mode = false;
+        } else if (!is_stop_mode) {
+            Guard guard(m_mutex);
+            std::cerr << "[" << m_profile.instance_name << "] [" << m_qRef.tm
+                      << "] emergencySignal from LimbTorqueController is set!" << std::endl;
             is_stop_mode = true;
         }
     }

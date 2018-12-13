@@ -132,6 +132,8 @@ protected:
     std::vector<RTC::OutPort<RTC::TimedDoubleSeq> *> m_ref_forceOut;
     RTC::TimedOrientation3D m_rpy;
     RTC::InPort<RTC::TimedOrientation3D> m_rpyIn;
+    RTC::TimedLong m_emergencySignal;
+    RTC::OutPort<RTC::TimedLong> m_emergencySignalOut;
 
     RTC::TimedDoubleSeq m_q;
     RTC::OutPort<RTC::TimedDoubleSeq> m_qOut;
@@ -352,6 +354,9 @@ private:
     void ReferenceTorqueChecker();
     void ReferenceForceUpdater();
     void ModeSelector();
+
+    // emergency flags
+    bool reset_emergency_flag, is_emergency;
 
     // returns quaternion that means rotation from act to ref
     inline void safe_quaternion_comparison(const hrp::dquaternion& _q_ref, const hrp::dquaternion& _q_act, hrp::dquaternion& _q_diff)

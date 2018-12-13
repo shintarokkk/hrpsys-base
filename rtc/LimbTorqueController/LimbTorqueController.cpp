@@ -65,6 +65,7 @@ LimbTorqueController::LimbTorqueController(RTC::Manager* manager)
       m_basePosIn("basePosIn", m_basePos), //eus等からのref値
       m_baseRpyIn("baseRpyIn", m_baseRpy), //eus等からのref値
       m_rpyIn("rpy", m_rpy), //IMU情報
+      m_emergencySignalOut("emergencySignal", m_emergencySignal),
       m_qOut("q", m_q), //qRefそのまま出すのでよい
       m_tqOut("tq", m_tq), //torque out
       m_LimbTorqueControllerServicePort("LimbTorqueControllerService"),
@@ -93,6 +94,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     addInPort("basePosIn", m_basePosIn);
     addInPort("baseRpyIn", m_baseRpyIn);
     addInPort("rpy", m_rpyIn);
+    addOutPort("emergencySignal", m_emergencySignalOut);
 
     // Set OutPort buffer
     addOutPort("q", m_qOut);
@@ -534,6 +536,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
     loop = 0;
 
     spit_log = false;
+    is_emergency = false;
+    reset_emergency_flag = false;
 
     //set IIR filter constants (for velocity estimation)
     iir_cutoff_frequency = 10.0; //Hz
@@ -681,6 +685,17 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
         m_ref_force[arm_idx].tm = m_qRef.tm;
         m_ref_forceOut[arm_idx]->write();
         it++;
+    }
+
+    // write emregency signal
+    if (reset_emergency_flag) {
+      m_emergencySignal.data = 0;
+      m_emergencySignalOut.write();
+      reset_emergency_flag = false;
+      is_emergency = false;
+    } else if (is_emergency) {
+      m_emergencySignal.data = 1;
+      m_emergencySignalOut.write();
     }
 
     if(spit_log){
@@ -2032,8 +2047,10 @@ void LimbTorqueController::ModeSelector()
                     if(ts.vel_over_limit || ts.pos_over_limit || ts.ori_over_limit){
                         if(td.dual){
                             change_to_emergency = true;
+                            is_emergency = true;
                         }else{
                             param.amode = EMERGENCY;
+                            is_emergency = true;
                             reset_taskstate_bool(ts);
                             ts.initial_pos = act_eepos[ee_name];
                             ts.initial_ori = act_eequat[ee_name];
@@ -2054,8 +2071,10 @@ void LimbTorqueController::ModeSelector()
                         }
                         if(td.dual){
                             change_to_contact = true;
+                            is_emergency = true; //stops joint angle ref in contact mode
                         }else{
                             param.amode = MANIP_CONTACT;
+                            is_emergency = true; //stops joint angle ref in contact mode
                             reset_taskstate_bool(ts);
                             ts.initial_pos = act_eepos[ee_name];
                             ts.initial_ori = act_eequat[ee_name];
@@ -2099,9 +2118,9 @@ void LimbTorqueController::ModeSelector()
                             }
                         }
                         if(td.dual){
-                            change_to_emergency = true;
+                            change_to_emergency = true; //is_emergency is already true
                         }else{
-                            param.amode = EMERGENCY;
+                            param.amode = EMERGENCY; //is_emergency is already true
                             reset_taskstate_bool(ts);
                             ts.initial_pos = act_eepos[ee_name];
                             ts.initial_ori = act_eequat[ee_name];
@@ -2163,6 +2182,7 @@ void LimbTorqueController::ModeSelector()
                     if(ts.em_transition_count <= 0){
                         //eusからの指令待機
                         if (release_emergency_called[ee_name]){
+                            reset_emergency_flag = true;
                             if(td.dual){
                                 change_to_idle = true;
                             }else{

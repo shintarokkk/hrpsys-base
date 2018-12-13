@@ -116,6 +116,7 @@ protected:
     TimedDoubleSeq m_qRef;
     TimedDoubleSeq m_q;
     TimedLong m_emergencySignal;
+    TimedLong m_limbemergencySignal;
     TimedLong m_emergencyMode;
     OpenHRP::TimedLongSeqSeq m_servoState;
     std::vector<TimedDoubleSeq> m_wrenchesRef;
@@ -126,6 +127,7 @@ protected:
     // <rtc-template block="inport_declare">
     InPort<TimedDoubleSeq> m_qRefIn;
     InPort<TimedLong> m_emergencySignalIn;
+    InPort<TimedLong> m_limbemergencySignalIn;
     InPort<OpenHRP::TimedLongSeqSeq> m_servoStateIn;
     std::vector<InPort<TimedDoubleSeq> *> m_wrenchesIn;
   

@@ -645,7 +645,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
             m_q.data[i] = m_robotRef->joint(i)->q;
             hrp::Link* current_joint = m_robot->joint(i);
             // checking torque limits
-            double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+            double max_torque = reference_climit(i) * current_joint->gearRatio * current_joint->torqueConst;
             if (reference_torque(i) > max_torque){
                 if(loop%100 == 0){
                     std::cout << "[ltc]joint(" << i << ") reached max torque limit!!"
@@ -1813,25 +1813,22 @@ void LimbTorqueController::ReferenceTorqueChecker()
         if (param.is_active) {
             hrp::JointPathExPtr manip = param.manip;
             int limbdof = manip->numJoints();
-            switch(param.amode){
-            case(MANIP_CONTACT):{
-                for (int i = 0; i<limbdof; i++){
-                    int jid = m_robot->joint(i)->jointId;
-                    hrp::Link* current_joint = m_robot->joint(jid);
-                    double max_torque = reference_climit(jid) * current_joint->gearRatio * current_joint->torqueConst;
-                    if (reference_torque(jid) > max_torque){
-                        reference_torque(i) = max_torque;
-                        //limb_task_state[ee_name].torque_over_limit = true;
-                    }else if (reference_torque(jid) < -max_torque){
-                        reference_torque(i) = -max_torque;
-                        //limb_task_state[ee_name].torque_over_limit = true;
-                    }
+            for (int i = 0; i<limbdof; i++){
+                int jid = m_robot->joint(i)->jointId;
+                hrp::Link* current_joint = m_robot->joint(jid);
+                double max_torque = reference_climit(jid) * current_joint->gearRatio * current_joint->torqueConst;
+                if (reference_torque(jid) > max_torque){
+                    reference_torque(i) = max_torque;
+                    std::cout << "[ltc]joint(" << i << ") reached max torque limit!!"
+                              << "original ref=" << reference_torque(i) << ",max=" << max_torque
+                              << std::endl;
+                }else if (reference_torque(jid) < -max_torque){
+                    reference_torque(i) = -max_torque;
+                    std::cout << "[ltc]joint(" << i << ") reached min torque limit!!"
+                              << "original ref=" << reference_torque(i) << ",min=" << -max_torque
+                              << std::endl;
                 }
-                break;
             }
-            default:
-                break;
-            } //end switch amode
         }
         it++;
     }
@@ -1849,7 +1846,8 @@ void LimbTorqueController::ActualTorqueChecker()
             for (int i = 0; i<limbdof; i++){
                 int jid = m_robot->joint(i)->jointId;
                 hrp::Link* current_joint = m_robot->joint(jid);
-                double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+                //double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
+                double max_torque = 1.2 * reference_climit(jid) * current_joint->gearRatio * current_joint->torqueConst; //limiting actual by reduced limit for safety
                 if (actual_torque_vector(jid) > max_torque){
                     limb_task_state[ee_name].torque_over_limit = true;
                 }else if (actual_torque_vector(jid) < -max_torque){

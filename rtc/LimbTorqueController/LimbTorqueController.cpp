@@ -2473,21 +2473,6 @@ bool LimbTorqueController::setLimbTorqueControllerParam(const std::string& i_nam
         hrp::dmatrix concatenated_pgain = ee_pgain_vec.asDiagonal();  //just for print
         hrp::dmatrix concatenated_dgain = ee_dgain_vec.asDiagonal();  //just for print
 
-        switch(i_param_.amode){
-        case OpenHRP::LimbTorqueControllerService::IDLE_NORMAL:
-            m_lt_param[name].amode = IDLE_NORMAL;
-        case OpenHRP::LimbTorqueControllerService::IDLE_HARD:
-            m_lt_param[name].amode = IDLE_HARD;
-        case OpenHRP::LimbTorqueControllerService::IDLE_COMPLIANT:
-            m_lt_param[name].amode = IDLE_COMPLIANT;
-        case OpenHRP::LimbTorqueControllerService::MANIP_FREE:
-            m_lt_param[name].amode = MANIP_FREE;
-        case OpenHRP::LimbTorqueControllerService::MANIP_CONTACT:
-            m_lt_param[name].amode = MANIP_CONTACT;
-        case OpenHRP::LimbTorqueControllerService::EMERGENCY:
-            m_lt_param[name].amode = EMERGENCY;
-        }
-
         std::cerr << "[" << m_profile.instance_name << "] set parameters" << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]             name : " << name << std::endl;
         std::cerr << "[" << m_profile.instance_name << "]  Pgain, Dgain : " << m_lt_param[name].pgain << " " << m_lt_param[name].dgain << std::endl;

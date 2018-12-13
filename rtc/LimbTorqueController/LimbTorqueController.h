@@ -334,20 +334,9 @@ private:
     void estimateEEVelForce();
     void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 
-    // disturbance observer
-    std::map<std::string, hrp::Vector3> force_increase, prev_filtered_force;
-    std::map<std::string, bool> observe_disturbance, dist_obs_initialized;
-    std::map<std::string, std::ofstream*> debug_vel_discrepancy, debug_force_inc;
-    std::map<std::string, bool> disturbance_detected;
-
     // reference torque regulator
     hrp::dvector invdyn_accvel_tq, invdyn_grav_tq, eecomp_tq, nullspace_tq;
     hrp::dvector reference_torque;
-    std::map<std::string, bool> reftqregulator_initialized;
-    std::map<std::string, int> disturbance_uncheck_count;
-    int max_disturbance_uncheck_count;
-    std::map<std::string, hrp::Vector3> reaction_eepos, reaction_eevel, reaction_eew;
-    std::map<std::string, hrp::dquaternion> reaction_eeori;
 
     // Error Checkers
     std::map<std::string, bool> poserrchecker_initialized;

@@ -386,8 +386,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         overwrite_refangle[ee_name] = false;
         stop_overwriting_q_transition_count[ee_name] = 0;
         eeest_initialized[ee_name] = false;
-        dist_obs_initialized[ee_name] = false;
-        reftqregulator_initialized[ee_name] = false;
         //for error check & mode selection
         TaskDescription td;
         TaskState ts;
@@ -676,7 +674,7 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
             TaskState& ts = limb_task_state[ee_name];
             hrp::Vector3 world_ref_force = ts.F_eeR * ts.F_now.head(3);
             for(int i=0; i<3; i++){
-                m_ref_force[arm_idx].data[i] = world_ref_force[i];
+                m_ref_force[arm_idx].data[i] = - world_ref_force[i]; //TODO: is sign correct???
             }
         }
         // need to write tm? (does not seem to be used...)
@@ -2277,8 +2275,6 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteescrew[ee_name]) << micro_time;
                     *(debug_acteewrench[ee_name]) << micro_time;
                     *(debug_esteewrench[ee_name]) << micro_time;
-                    *(debug_vel_discrepancy[ee_name]) << micro_time;
-                    *(debug_force_inc[ee_name]) << micro_time;
                     *(debug_cdve[ee_name]) << micro_time;
                     *(debug_odve[ee_name]) << micro_time;
                     *(debug_dtt[ee_name]) << micro_time;
@@ -2333,8 +2329,6 @@ void LimbTorqueController::DebugOutput()
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
                         *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
-                        // *(debug_vel_discrepancy[ee_name]) << " " << velocity_discrepancy[ee_name](i);
-                        *(debug_force_inc[ee_name]) << " " << force_increase[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
@@ -2380,8 +2374,6 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteescrew[ee_name]) << std::endl;
                     *(debug_acteewrench[ee_name]) << std::endl;
                     *(debug_esteewrench[ee_name]) << std::endl;
-                    *(debug_vel_discrepancy[ee_name]) << std::endl;
-                    *(debug_force_inc[ee_name]) << std::endl;
                     *(debug_cdve[ee_name]) << std::endl;
                     *(debug_odve[ee_name]) << std::endl;
                     *(debug_dtt[ee_name]) << std::endl;
@@ -2731,8 +2723,6 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_esteescrew[ee_name] = new std::ofstream((logpath  + std::string("est_ee_screw.dat")).c_str());
                 debug_acteewrench[ee_name] = new std::ofstream((logpath  + std::string("act_ee_wrench.dat")).c_str());
                 debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
-                debug_vel_discrepancy[ee_name] = new std::ofstream((logpath  + std::string("vel_discrepancy.dat")).c_str());
-                debug_force_inc[ee_name] = new std::ofstream((logpath  + std::string("force_increase.dat")).c_str());
                 debug_cdve[ee_name] = new std::ofstream((logpath + std::string("cdve.dat")).c_str());
                 debug_odve[ee_name] = new std::ofstream((logpath + std::string("odve.dat")).c_str());
                 debug_dtt[ee_name] = new std::ofstream((logpath + std::string("dtt.dat")).c_str());
@@ -2798,8 +2788,6 @@ bool LimbTorqueController::stopLog()
                 delete debug_esteescrew[ee_name];
                 delete debug_acteewrench[ee_name];
                 delete debug_esteewrench[ee_name];
-                delete debug_vel_discrepancy[ee_name];
-                delete debug_force_inc[ee_name];
                 delete debug_cdve[ee_name];
                 delete debug_odve[ee_name];
                 delete debug_dtt[ee_name];

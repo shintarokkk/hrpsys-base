@@ -313,6 +313,7 @@ private:
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror; //calcEECompensation
     std::map<std::string, std::ofstream*> debug_dqest, debug_dqact, debug_qest, debug_qact, debug_qref; //estimateRefdq
     std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench; //ee vel&force estimation
+    std::map<std::string, std::ofstream*> debug_fnow; //reference force update
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational

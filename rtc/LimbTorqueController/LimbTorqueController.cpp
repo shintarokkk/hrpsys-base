@@ -2301,6 +2301,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ppen[ee_name]) << micro_time;
                     *(debug_tdqw[ee_name]) << micro_time;
                     *(debug_udqw[ee_name]) << micro_time;
+                    *(debug_fnow[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2343,6 +2344,7 @@ void LimbTorqueController::DebugOutput()
                         *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
                         *(debug_esteescrew[ee_name]) << " " << filtered_screw[ee_name](i);
                         *(debug_esteewrench[ee_name]) << " " << filtered_wrench[ee_name](i);
+                        *(debug_fnow[ee_name]) << " " << limb_task_state[ee_name].F_now(i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
@@ -2400,6 +2402,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ppen[ee_name]) << std::endl;
                     *(debug_tdqw[ee_name]) << std::endl;
                     *(debug_udqw[ee_name]) << std::endl;
+                    *(debug_fnow[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2735,6 +2738,7 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_ppen[ee_name] = new std::ofstream((logpath + std::string("ppen.dat")).c_str());
                 debug_tdqw[ee_name] = new std::ofstream((logpath + std::string("tdqw.dat")).c_str());
                 debug_udqw[ee_name] = new std::ofstream((logpath + std::string("udqw.dat")).c_str());
+                debug_fnow[ee_name] = new std::ofstream((logpath + std::string("local_refforce.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2799,6 +2803,7 @@ bool LimbTorqueController::stopLog()
                 delete debug_ppen[ee_name];
                 delete debug_tdqw[ee_name];
                 delete debug_udqw[ee_name];
+                delete debug_fnow[ee_name];
             }
         }
         it++;

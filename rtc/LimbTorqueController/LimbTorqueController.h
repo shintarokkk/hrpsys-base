@@ -222,7 +222,6 @@ private:
         int max_f2c_t_count; //maximum value of f2c_transition_count
         int em_transition_count; //transition to EMERGENCY: releaving reference force
         int max_em_t_count; //maximum value of em_transition_count
-        int rfu_count; //count of loop of reference force update, starting at the end of transition
         hrp::dvector F_em_init; //F_now at the moment of emergency transition
         double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
@@ -408,13 +407,14 @@ private:
         _ts.torque_over_limit = false;
         _ts.em_transition_count = 0;
         _ts.f2c_transition_count = 0;
-        _ts.rfu_count = 0;
     }
 
     // temporary setting these global for debugging
     //MOVE_POS
     std::map<std::string, double> check_dir_vel_err, other_dir_vel_err, dist_to_target, pos_error_norm;
     std::map<std::string, std::ofstream*> debug_cdve, debug_odve, debug_dtt, debug_pen;
+    std::map<std::string, hrp::Vector3> world_ref_force; //actualはabs_forces
+    std::map<std::string, std::ofstream*> debug_wrf; //actualはdebug_acteewrench
     //MOVE_POSROT
     std::map<std::string, double> pdist_to_target, ppos_error_norm, target_dir_quatdiffw, unwanted_dir_quatdiffw;
     std::map<std::string, std::ofstream*> debug_pdtt, debug_ppen, debug_tdqw, debug_udqw;

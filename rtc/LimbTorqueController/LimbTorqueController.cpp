@@ -427,7 +427,6 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.max_f2c_t_count = 500;
         ts.em_transition_count = 0;
         ts.max_em_t_count = 300;
-        ts.rfu_count = 0;
         ts.F_em_init.resize(6);
         ts.init_point_vel = 0.0;
         ts.init_point_w = 0.0;
@@ -1929,8 +1928,7 @@ void LimbTorqueController::ReferenceForceUpdater()
                     switch(td.type){
                     case(MOVE_POS):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
-                        ts.rfu_count += 1; //count up
-                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * ts.rfu_count * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         break;
                     } //end case MOVE_POS
                     case(MOVE_ROT):{
@@ -1940,8 +1938,7 @@ void LimbTorqueController::ReferenceForceUpdater()
                     } //end case MOVE_ROT
                     case(MOVE_POSROT):{
                         double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
-                        ts.rfu_count += 1; //count up
-                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * ts.rfu_count * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
+                        ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
                         if(targ_dir_pos_ratio <= 0){
                             targ_dir_pos_ratio = 0; //マイナスは入れない
@@ -2293,10 +2290,13 @@ void LimbTorqueController::DebugOutput()
                     *(debug_esteescrew[ee_name]) << micro_time;
                     *(debug_acteewrench[ee_name]) << micro_time;
                     *(debug_esteewrench[ee_name]) << micro_time;
-                    *(debug_cdve[ee_name]) << micro_time;
-                    *(debug_odve[ee_name]) << micro_time;
-                    *(debug_dtt[ee_name]) << micro_time;
-                    *(debug_pen[ee_name]) << micro_time;
+                    //MOVE_POS: MANIP_FREE
+                    *(debug_cdve[ee_name]) << micro_time; //check_dir_vel_err
+                    *(debug_odve[ee_name]) << micro_time; //other_dir_vel_err
+                    //MOVE_POS: MANIP_CONCTACT
+                    *(debug_dtt[ee_name]) << micro_time; //dist_to_target
+                    *(debug_pen[ee_name]) << micro_time; //pos_error_norm
+                    //MOVE_POSROT
                     *(debug_pdtt[ee_name]) << micro_time;
                     *(debug_ppen[ee_name]) << micro_time;
                     *(debug_tdqw[ee_name]) << micro_time;

@@ -446,6 +446,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ppos_error_norm[ee_name] = 0.0;
         target_dir_quatdiffw[ee_name] = 1.0;
         unwanted_dir_quatdiffw[ee_name] = 1.0;
+        world_ref_wrench[ee_name].resize(6);
 
         std::cerr << "[" << m_profile.instance_name << "]   sensor = " << sensor_name << ", sensor-link = " << sensor_link_name << ", ee_name = " << ee_name << ", ee_link = " << target_link->name << std::endl;
     }
@@ -1287,16 +1288,17 @@ void LimbTorqueController::calcEmergencyEECompensation(std::map<std::string, LTP
         std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
         std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
     }
-    hrp::dvector emergency_wrench(6);
+    //hrp::dvector emergency_wrench(6);
     hrp::Vector3 em_w_f = ts.F_eeR * ts.F_now.head(3);
     hrp::Vector3 em_w_m = ts.F_eeR * ts.F_now.tail(3);
-    emergency_wrench << em_w_f, em_w_m;
+    //emergency_wrench << em_w_f, em_w_m;
+    world_ref_wrench[ee_name] << em_w_f, em_w_m;
     // std::cout << std::endl << "Emergency EEComp Torque:" << ee_name << std::endl;
     // std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
     // std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
     // std::cout << "emergency_wrench = " << emergency_wrench.transpose() << std::endl;
     // map wrench to joint torque
-    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + emergency_wrench);
+    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
 
     // debug output
     if(loop%1000==0){
@@ -1363,16 +1365,18 @@ void LimbTorqueController::calcContactEECompensation(std::map<std::string, LTPar
         std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
         std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
     }
-    hrp::dvector contact_wrench(6);
+    //hrp::dvector contact_wrench(6);
+    //hrp::Vector3 cont_w_f = ts.F_eeR * ts.F_now.head(3);
     hrp::Vector3 cont_w_f = ts.F_eeR * ts.F_now.head(3);
     hrp::Vector3 cont_w_m = ts.F_eeR * ts.F_now.tail(3);
-    contact_wrench << cont_w_f, cont_w_m;
+    //contact_wrench << cont_w_f, cont_w_m;
+    world_ref_wrench[ee_name] << cont_w_f, cont_w_m;
     // std::cout << std::endl << "Contact EEComp Torque:" << ee_name << std::endl;
     // std::cout << "pos_ori_comp_wrench = " << ee_pos_ori_comp_wrench[ee_name].transpose() << std::endl;
     // std::cout << "vel_w_comp_wrench = " << ee_vel_w_comp_wrench[ee_name].transpose() << std::endl;
     // std::cout << "emergency_wrench = " << contact_wrench.transpose() << std::endl;
     // map wrench to joint torque
-    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + contact_wrench);
+    ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
 
     // debug output
     if(loop%1000==0){
@@ -2296,12 +2300,12 @@ void LimbTorqueController::DebugOutput()
                     //MOVE_POS: MANIP_CONCTACT
                     *(debug_dtt[ee_name]) << micro_time; //dist_to_target
                     *(debug_pen[ee_name]) << micro_time; //pos_error_norm
+                    *(debug_wrw[ee_name]) << micro_time;
                     //MOVE_POSROT
                     *(debug_pdtt[ee_name]) << micro_time;
                     *(debug_ppen[ee_name]) << micro_time;
                     *(debug_tdqw[ee_name]) << micro_time;
                     *(debug_udqw[ee_name]) << micro_time;
-                    *(debug_fnow[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2344,7 +2348,7 @@ void LimbTorqueController::DebugOutput()
                         *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
                         *(debug_esteescrew[ee_name]) << " " << filtered_screw[ee_name](i);
                         *(debug_esteewrench[ee_name]) << " " << filtered_wrench[ee_name](i);
-                        *(debug_fnow[ee_name]) << " " << limb_task_state[ee_name].F_now(i);
+                        *(debug_wrw[ee_name]) << " " << world_ref_wrench[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
@@ -2402,7 +2406,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ppen[ee_name]) << std::endl;
                     *(debug_tdqw[ee_name]) << std::endl;
                     *(debug_udqw[ee_name]) << std::endl;
-                    *(debug_fnow[ee_name]) << std::endl;
+                    *(debug_wrw[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2738,7 +2742,7 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_ppen[ee_name] = new std::ofstream((logpath + std::string("ppen.dat")).c_str());
                 debug_tdqw[ee_name] = new std::ofstream((logpath + std::string("tdqw.dat")).c_str());
                 debug_udqw[ee_name] = new std::ofstream((logpath + std::string("udqw.dat")).c_str());
-                debug_fnow[ee_name] = new std::ofstream((logpath + std::string("local_refforce.dat")).c_str());
+                debug_wrw[ee_name] = new std::ofstream((logpath + std::string("world_refwrench.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2803,7 +2807,7 @@ bool LimbTorqueController::stopLog()
                 delete debug_ppen[ee_name];
                 delete debug_tdqw[ee_name];
                 delete debug_udqw[ee_name];
-                delete debug_fnow[ee_name];
+                delete debug_wrw[ee_name];
             }
         }
         it++;

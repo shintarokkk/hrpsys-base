@@ -312,7 +312,6 @@ private:
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror; //calcEECompensation
     std::map<std::string, std::ofstream*> debug_dqest, debug_dqact, debug_qest, debug_qact, debug_qref; //estimateRefdq
     std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench; //ee vel&force estimation
-    std::map<std::string, std::ofstream*> debug_fnow; //reference force update
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational
@@ -413,8 +412,8 @@ private:
     //MOVE_POS
     std::map<std::string, double> check_dir_vel_err, other_dir_vel_err, dist_to_target, pos_error_norm;
     std::map<std::string, std::ofstream*> debug_cdve, debug_odve, debug_dtt, debug_pen;
-    std::map<std::string, hrp::Vector3> world_ref_force; //actualはabs_forces
-    std::map<std::string, std::ofstream*> debug_wrf; //actualはdebug_acteewrench
+    std::map<std::string, hrp::dvector> world_ref_wrench; //actualはabs_forces
+    std::map<std::string, std::ofstream*> debug_wrw; //actualはdebug_acteewrench
     //MOVE_POSROT
     std::map<std::string, double> pdist_to_target, ppos_error_norm, target_dir_quatdiffw, unwanted_dir_quatdiffw;
     std::map<std::string, std::ofstream*> debug_pdtt, debug_ppen, debug_tdqw, debug_udqw;

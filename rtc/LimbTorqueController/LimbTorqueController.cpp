@@ -1519,115 +1519,6 @@ void LimbTorqueController::estimateRefdq()
     }
 }
 
-// assuming isotropic gain, mass, inertia
-void LimbTorqueController::estimateEEVelForce()
-{
-    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-    while(it != m_lt_param.end()){
-        LTParam& param = it->second;
-        std::string ee_name = it->first;
-        if (param.is_active) {
-            if (DEBUGP) {
-                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-            }
-            if(!eeest_initialized[ee_name]){
-                estimateEEVelForce_init(it);
-                eeest_initialized[ee_name] = true;
-            }
-            const Matrix22 Iden22 = Matrix22::Identity();
-            // translational part
-            for (int i=0; i<3; i++){
-                // prediction step
-                Vector2 prior_state_est;
-                Matrix22 state_update_matrix, prior_error_covariance;
-                double sum12, sum21, sum22; // components of state update matrix
-                sum12 = RTC_PERIOD / impedance_mass_mat[ee_name](i,i);
-                sum21 = - RTC_PERIOD * param.ee_pgain_p(i,i);
-                sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_p(i,i)/impedance_mass_mat[ee_name](i,i);
-                state_update_matrix <<
-                    1.0, sum12,
-                    sum21, sum22;
-                prior_state_est = state_update_matrix * trans_est[ee_name][i];
-                prior_error_covariance = state_update_matrix * trans_covariance[ee_name][i] * state_update_matrix.transpose() + translational_system_noise_matrix[ee_name];
-                // filtering step
-                Matrix22 kalman_gain;
-                Vector2 observation;
-                observation << act_ee_vel[ee_name](i), abs_forces[param.sensor_name](i);
-                kalman_gain = prior_error_covariance * (prior_error_covariance + translational_observation_noise_matrix[ee_name]).inverse();
-                trans_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
-                trans_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
-            }
-            // rotational part
-            for (int i=0; i<3; i++){
-                // prediction step
-                Vector2 prior_state_est;
-                Matrix22 state_update_matrix, prior_error_covariance;
-                double sum12, sum21, sum22; // components of state update matrix
-                sum12 = RTC_PERIOD / impedance_inertia_mat[ee_name](i,i);
-                sum21 = - RTC_PERIOD * param.ee_pgain_r(i,i);
-                sum22 = 1.0 - RTC_PERIOD*param.ee_dgain_r(i,i)/impedance_inertia_mat[ee_name](i,i);
-                state_update_matrix <<
-                    1.0, sum12,
-                    sum21, sum22;
-                prior_state_est = state_update_matrix * rot_est[ee_name][i];
-                prior_error_covariance = state_update_matrix * rot_covariance[ee_name][i] * state_update_matrix.transpose() + rotational_system_noise_matrix[ee_name];
-                // filtering step
-                Matrix22 kalman_gain;
-                Vector2 observation;
-                observation << act_ee_w[ee_name](i), abs_moments[param.sensor_name](i);
-                kalman_gain = prior_error_covariance * (prior_error_covariance + rotational_observation_noise_matrix[ee_name]).inverse();
-                rot_est[ee_name][i] = prior_state_est + kalman_gain * (observation - prior_state_est);
-                rot_covariance[ee_name][i] = (Iden22 - kalman_gain) * prior_error_covariance;
-            }
-            // reorganize variants into screw and wrench
-            for(int i=0; i<3; i++){
-                // TODO: exclude original reference velocity?
-                filtered_screw[ee_name](i) = trans_est[ee_name][i](0);
-                filtered_screw[ee_name](i+3) = rot_est[ee_name][i](0);
-                filtered_wrench[ee_name](i) = trans_est[ee_name][i](1);
-                filtered_wrench[ee_name](i+3) = rot_est[ee_name][i](1);
-            }
-        }
-        it++;
-    }
-}
-
-void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it)
-{
-    std::string ee_name = it->first;
-    if (DEBUGP) {
-        std::cerr << "ここにデバッグメッセージを流す" << std::endl;
-    }
-    const hrp::Matrix33 Iden33 = hrp::Matrix33::Identity();
-    const Vector2 zv2 = Vector2::Zero();
-    const Matrix22 Iden22 = Matrix22::Identity();
-    // set iteratively updated parameters
-    for (int i=0; i<3; i++){
-        trans_est[ee_name].push_back(zv2);
-        rot_est[ee_name].push_back(zv2);
-        Matrix22 initial_error_covariance = Iden22;
-        trans_covariance[ee_name].push_back(initial_error_covariance);
-        rot_covariance[ee_name].push_back(initial_error_covariance);
-    }
-    translational_system_noise_matrix[ee_name] <<
-        1e-4, 0.0,
-        0.0, 4e-1;
-    rotational_system_noise_matrix[ee_name] <<
-        1e-3, 0.0,
-        0.0, 2e-1;
-    translational_observation_noise_matrix[ee_name] <<
-        1e-2, 0.0,
-        0.0, 5.0;
-    rotational_observation_noise_matrix[ee_name] <<
-        5e-2, 0.0,
-        0.0, 2.0;
-    impedance_mass_mat[ee_name] = 5.0 * Iden33; //kg
-    impedance_inertia_mat[ee_name] = 1.0 * Iden33; //kg m^2
-    // initialize log variants
-    filtered_screw[ee_name].resize(6);
-    filtered_wrench[ee_name].resize(6);
-}
-
 // eeest_initialized: EE速度フィルタが始まってからチェックする
 // TODO; モード依存のチェック(directional)
 void LimbTorqueController::VelocityErrorChecker()
@@ -1642,7 +1533,7 @@ void LimbTorqueController::VelocityErrorChecker()
             switch(param.amode){
                 // Free motion
             case(MANIP_FREE):{
-                hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_screw[ee_name].head(3); // in ee local coordinates
+                hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
                 // double check_dir_vel_err = td.velocity_check_dir.dot(ref_act_eevel_diff);
                 // double other_dir_vel_err = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
                 // temporary: setting global for debugging
@@ -1656,27 +1547,27 @@ void LimbTorqueController::VelocityErrorChecker()
                 break;
             } // end case manip_normal
             case(MANIP_CONTACT):{
-                if(filtered_screw[ee_name].head(3).norm() > td.cont_vel_error_limit){
+                if(filtered_ee_vel[ee_name].norm() > td.cont_vel_error_limit){
                     ts.vel_over_limit = true;
                 }
                 break;
             } // end case manip_contact
             case(IDLE_NORMAL):{ // mode IDLE_NORMAL
-                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_ee_vel[ee_name];
                 if (ref_act_eevel_diff.norm() > 0.1){ //threshold should be tuned
                     ts.vel_over_limit = true;
                 }
                 break;
             }
             case(IDLE_COMPLIANT):{
-                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_ee_vel[ee_name];
                 if (ref_act_eevel_diff.norm() < compliant_end_vel_thresh){ //threshold should be tuned
                     ts.vel_over_thresh = true;
                 }
                 break;
             } // end case idle_compliant
             case(IDLE_HARD):{
-                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_screw[ee_name].head(3);
+                hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_ee_vel[ee_name];
                 if (ref_act_eevel_diff.norm() < compliant_end_vel_thresh){ //threshold should be tuned
                     ts.vel_over_thresh = true;
                 }
@@ -1923,25 +1814,25 @@ void LimbTorqueController::ReferenceForceUpdater()
                         //ts.F_now.tail(3) = (ts.max_f2c_t_count - ts.f2c_transition_count) * td.F_init.tail(3) / ts.max_f2c_t_count; //linearly approaching to F_init
                         ts.f2c_transition_count--;
                         if(ts.f2c_transition_count == 0){
-                            ts.init_point_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
-                            ts.init_point_w = ts.world_ori_targ_dir.dot(filtered_screw[ee_name].tail(3));
+                            ts.init_point_vel = ts.world_pos_targ_dir.dot(filtered_ee_vel[ee_name]);
+                            ts.init_point_w = ts.world_ori_targ_dir.dot(act_ee_w[ee_name]);
                         }
                     }
                 }
                 else{ // if transition is over
                     switch(td.type){
                     case(MOVE_POS):{
-                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
+                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_ee_vel[ee_name]);
                         ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         break;
                     } //end case MOVE_POS
                     case(MOVE_ROT):{
-                        double targ_dir_w = ts.world_ori_targ_dir.dot(filtered_screw[ee_name].tail(3));
+                        double targ_dir_w = ts.world_ori_targ_dir.dot(act_ee_w[ee_name]);
                         ts.F_now.tail(3) = td.F_init.tail(3) + td.w_force_gain * (ts.init_point_w - targ_dir_w) * ts.world_ori_targ_dir; //linear force-velocity relationship with a condition that the point (F_init, init_point_vel) is on the line
                         break;
                     } //end case MOVE_ROT
                     case(MOVE_POSROT):{
-                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_screw[ee_name].head(3));
+                        double targ_dir_vel = ts.world_pos_targ_dir.dot(filtered_ee_vel[ee_name]);
                         ts.F_now.head(3) = td.F_init.head(3) + (td.vel_force_gain * RTC_PERIOD  * (td.target_velocity - targ_dir_vel)) * ts.world_pos_targ_dir; //update force by integration
                         double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task
                         if(targ_dir_pos_ratio <= 0){
@@ -2291,9 +2182,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_qact[ee_name]) << micro_time;
                     *(debug_qref[ee_name]) << micro_time;
                     *(debug_acteescrew[ee_name]) << micro_time;
-                    *(debug_esteescrew[ee_name]) << micro_time;
                     *(debug_acteewrench[ee_name]) << micro_time;
-                    *(debug_esteewrench[ee_name]) << micro_time;
                     //MOVE_POS: MANIP_FREE
                     *(debug_cdve[ee_name]) << micro_time; //check_dir_vel_err
                     *(debug_odve[ee_name]) << micro_time; //other_dir_vel_err
@@ -2306,6 +2195,10 @@ void LimbTorqueController::DebugOutput()
                     *(debug_ppen[ee_name]) << micro_time;
                     *(debug_tdqw[ee_name]) << micro_time;
                     *(debug_udqw[ee_name]) << micro_time;
+                    // new eeest
+                    *(debug_filtereevel[ee_name]) << micro_time;
+                    *(debug_filtereef_ie[ee_name]) << micro_time;
+                    *(debug_filtereef_g[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2346,13 +2239,14 @@ void LimbTorqueController::DebugOutput()
                     for (int i=0; i<6; i++){
                         *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
                         *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
-                        *(debug_esteescrew[ee_name]) << " " << filtered_screw[ee_name](i);
-                        *(debug_esteewrench[ee_name]) << " " << filtered_wrench[ee_name](i);
                         *(debug_wrw[ee_name]) << " " << world_ref_wrench[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
                         *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
+                        *(debug_filtereevel[ee_name]) << " " << filtered_ee_vel[ee_name](i);
+                        *(debug_filtereef_ie[ee_name]) << " " << filtered_f_ie[ee_name](i);
+                        *(debug_filtereef_g[ee_name]) << " " << filtered_f_g[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
@@ -2395,9 +2289,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_qact[ee_name]) << std::endl;
                     *(debug_qref[ee_name]) << std::endl;
                     *(debug_acteescrew[ee_name]) << std::endl;
-                    *(debug_esteescrew[ee_name]) << std::endl;
                     *(debug_acteewrench[ee_name]) << std::endl;
-                    *(debug_esteewrench[ee_name]) << std::endl;
                     *(debug_cdve[ee_name]) << std::endl;
                     *(debug_odve[ee_name]) << std::endl;
                     *(debug_dtt[ee_name]) << std::endl;
@@ -2407,6 +2299,9 @@ void LimbTorqueController::DebugOutput()
                     *(debug_tdqw[ee_name]) << std::endl;
                     *(debug_udqw[ee_name]) << std::endl;
                     *(debug_wrw[ee_name]) << std::endl;
+                    *(debug_filtereevel[ee_name]) << std::endl;
+                    *(debug_filtereef_ie[ee_name]) << std::endl;
+                    *(debug_filtereef_g[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2730,9 +2625,7 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_qact[ee_name] = new std::ofstream((logpath  + std::string("qact.dat")).c_str());
                 debug_qref[ee_name] = new std::ofstream((logpath  + std::string("qref.dat")).c_str());
                 debug_acteescrew[ee_name] = new std::ofstream((logpath  + std::string("act_ee_screw.dat")).c_str());
-                debug_esteescrew[ee_name] = new std::ofstream((logpath  + std::string("est_ee_screw.dat")).c_str());
                 debug_acteewrench[ee_name] = new std::ofstream((logpath  + std::string("act_ee_wrench.dat")).c_str());
-                debug_esteewrench[ee_name] = new std::ofstream((logpath  + std::string("est_ee_wrench.dat")).c_str());
                 debug_cdve[ee_name] = new std::ofstream((logpath + std::string("cdve.dat")).c_str());
                 debug_odve[ee_name] = new std::ofstream((logpath + std::string("odve.dat")).c_str());
                 debug_dtt[ee_name] = new std::ofstream((logpath + std::string("dtt.dat")).c_str());
@@ -2743,6 +2636,9 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_tdqw[ee_name] = new std::ofstream((logpath + std::string("tdqw.dat")).c_str());
                 debug_udqw[ee_name] = new std::ofstream((logpath + std::string("udqw.dat")).c_str());
                 debug_wrw[ee_name] = new std::ofstream((logpath + std::string("world_refwrench.dat")).c_str());
+                debug_filtereevel[ee_name] = new std::ofstream((logpath + std::string("filter_eevel.dat")).c_str());
+                debug_filtereef_ie[ee_name] = new std::ofstream((logpath + std::string("filter_eef_ie.dat")).c_str());
+                debug_filtereef_g[ee_name] = new std::ofstream((logpath + std::string("filter_eef_g.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2796,9 +2692,7 @@ bool LimbTorqueController::stopLog()
                 delete debug_qact[ee_name];
                 delete debug_qref[ee_name];
                 delete debug_acteescrew[ee_name];
-                delete debug_esteescrew[ee_name];
                 delete debug_acteewrench[ee_name];
-                delete debug_esteewrench[ee_name];
                 delete debug_cdve[ee_name];
                 delete debug_odve[ee_name];
                 delete debug_dtt[ee_name];
@@ -2808,6 +2702,9 @@ bool LimbTorqueController::stopLog()
                 delete debug_tdqw[ee_name];
                 delete debug_udqw[ee_name];
                 delete debug_wrw[ee_name];
+                delete debug_filtereevel[ee_name];
+                delete debug_filtereef_ie[ee_name];
+                delete debug_filtereef_g[ee_name];
             }
         }
         it++;
@@ -3059,4 +2956,80 @@ void LimbTorqueController::calcMinMaxAvoidanceTorque()
         }
         ++it;
     }
+}
+
+//under development
+// assuming isotropic ee impedance gain
+void LimbTorqueController::estimateEEVelForce()
+{
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            if (DEBUGP) {
+                std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+            }
+            if(!eeest_initialized[ee_name]){
+                estimateEEVelForce_init(it);
+                eeest_initialized[ee_name] = true;
+            }
+            const hrp::Matrix33 Iden33 = hrp::Matrix33::Identity();
+            hrp::Vector3 prior_state_est;
+            hrp::Matrix33 state_update_matrix, prior_error_covar;
+            Matrix32 kalman_gain;
+            Vector2 observation;
+            double eepgain_value = param.ee_pgain_p(0,0); // assuming isotropic ee impedance gain
+            double eedgain_value = param.ee_dgain_p(0,0); // assuming isotropic ee impedance gain
+            ee_state_coeff[ee_name] <<
+                1.0, RTC_PERIOD/virtual_ee_mass[ee_name], 0.0,
+                -eepgain_value*RTC_PERIOD, 1.0 - eedgain_value*RTC_PERIOD/virtual_ee_mass[ee_name], 0.0,
+                0.0, 0.0, 1.0;
+            // x, y, z
+            for (int i=0; i<3; i++){
+                // prediction step
+                prior_state_est = ee_state_coeff[ee_name] * ee_state_est[ee_name][i];
+                prior_error_covar = ee_state_coeff[ee_name] * ee_error_covar[ee_name][i] * ee_state_coeff[ee_name].transpose() + ee_system_noise[ee_name];
+                // filtering step
+                observation << act_ee_vel[ee_name](i), abs_forces[param.sensor_name](i);
+                kalman_gain = prior_error_covar * ee_obs_coeff[ee_name].transpose() * ( ee_obs_coeff[ee_name] * prior_error_covar * ee_obs_coeff[ee_name].transpose() + ee_obs_noise[ee_name] ).inverse();
+                ee_state_est[ee_name][i] = prior_state_est + kalman_gain * (observation - ee_obs_coeff[ee_name] * prior_state_est);
+                ee_error_covar[ee_name][i] = (Iden33 - kalman_gain * ee_obs_coeff[ee_name]) * prior_error_covar;
+            }
+            // reorganize variants into screw and wrench
+            for(int i=0; i<3; i++){
+                filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0);
+                filtered_f_ie[ee_name](i) = ee_state_est[ee_name][i](1);
+                filtered_f_g[ee_name](i) = ee_state_est[ee_name][i](2);
+            }
+        }
+        it++;
+    }
+}
+
+void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it)
+{
+    std::string ee_name = it->first;
+    if (DEBUGP) {
+        std::cerr << "ここにデバッグメッセージを流す" << std::endl;
+    }
+    const hrp::Matrix33 Iden33 = hrp::Matrix33::Identity();
+    const hrp::Vector3 zv3 = hrp::Vector3::Zero();
+    // set iteratively updated parameters
+    for (int i=0; i<3; i++){
+        ee_state_est[ee_name].push_back(zv3);
+        ee_error_covar[ee_name].push_back(Iden33); //change value?
+    }
+    // set fixed values
+    virtual_ee_mass[ee_name] = 20.0; //kg
+    ee_obs_coeff[ee_name] <<
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 1.0;
+    ee_system_noise[ee_name] <<
+        1e-4, 0.0, 0.0,
+        0.0, 4.0, 0.0,
+        0.0, 0.0, 5e-1;
+    ee_obs_noise[ee_name] <<
+        1e-2, 0.0,
+        0.0, 5.0;
 }

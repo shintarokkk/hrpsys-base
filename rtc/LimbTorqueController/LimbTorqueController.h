@@ -30,6 +30,8 @@
 #include "LimbTorqueControllerService_impl.h"
 
 typedef Eigen::Matrix<double, 2, 2> Matrix22;
+typedef Eigen::Matrix<double, 3, 2> Matrix32;
+typedef Eigen::Matrix<double, 2, 3> Matrix23;
 typedef Eigen::Matrix<double, 2, 1> Vector2;
 
 // minimum-root-mean-square-error filter for first order differenciation of Vector3
@@ -311,7 +313,7 @@ private:
     std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew; //calcEECompensation
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror; //calcEECompensation
     std::map<std::string, std::ofstream*> debug_dqest, debug_dqact, debug_qest, debug_qact, debug_qref; //estimateRefdq
-    std::map<std::string, std::ofstream*> debug_acteescrew, debug_esteescrew, debug_acteewrench, debug_esteewrench; //ee vel&force estimation
+    std::map<std::string, std::ofstream*> debug_acteescrew, debug_acteewrench; //ee vel&force estimation
     void DebugOutput();
     bool spit_log;
     int log_type; //1:collision, 2:operational
@@ -324,16 +326,6 @@ private:
     std::map<std::string, bool> velest_initialized, overwrite_refangle;
     std::map<std::string, int> stop_overwriting_q_transition_count;
     int max_stop_overwriting_q_transition_count;
-
-    // end-effector screw and wrench estimation
-    std::map<std::string, bool> eeest_initialized;
-    std::map<std::string, std::vector<Vector2> > trans_est, rot_est;
-    std::map<std::string, std::vector<Matrix22> > trans_covariance, rot_covariance;
-    std::map<std::string, hrp::Matrix33> impedance_mass_mat, impedance_inertia_mat;
-    std::map<std::string, Matrix22>  translational_system_noise_matrix, rotational_system_noise_matrix, translational_observation_noise_matrix, rotational_observation_noise_matrix;
-    std::map<std::string, hrp::dvector> filtered_screw, filtered_wrench;
-    void estimateEEVelForce();
-    void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 
     // reference torque regulator
     hrp::dvector invdyn_accvel_tq, invdyn_grav_tq, eecomp_tq, nullspace_tq;
@@ -417,6 +409,24 @@ private:
     //MOVE_POSROT
     std::map<std::string, double> pdist_to_target, ppos_error_norm, target_dir_quatdiffw, unwanted_dir_quatdiffw;
     std::map<std::string, std::ofstream*> debug_pdtt, debug_ppen, debug_tdqw, debug_udqw;
+
+    // for new ee estimation: only estimate translational part
+    // initially set values //mapじゃなくてもよいかも(両手に同一の値設定しているので)
+    std::map<std::string, bool> eeest_initialized;
+    std::map<std::string, double> virtual_ee_mass; //used just at initialization
+    std::map<std::string, Matrix23> ee_obs_coeff;
+    std::map<std::string, hrp::Matrix33> ee_system_noise;
+    std::map<std::string, Matrix22> ee_obs_noise;
+    // iteratively updated paramters
+    std::map<std::string, hrp::Matrix33> ee_state_coeff; //usually constant(change when ee gain is changed)
+    std::map<std::string, std::vector<hrp::Vector3> > ee_state_est;
+    std::map<std::string, std::vector<hrp::Matrix33> > ee_error_covar;
+    // reordered estimate values
+    std::map<std::string, hrp::Vector3> filtered_ee_vel, filtered_f_ie, filtered_f_g;
+    void estimateEEVelForce();
+    void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
+
+    std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_ie, debug_filtereef_g;
 };
 
 extern "C"

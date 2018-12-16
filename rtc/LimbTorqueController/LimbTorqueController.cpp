@@ -3022,15 +3022,15 @@ void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, L
     }
     // set fixed values
     virtual_ee_mass[ee_name] = 20.0; //kg
-    virtual_ee_mass_for_vel[ee_name] = 5.0; //kg
+    virtual_ee_mass_for_vel[ee_name] = 1.0; //kg
     ee_obs_coeff[ee_name] <<
         1.0, 0.0, 0.0,
         0.0, 1.0, 1.0;
     ee_system_noise[ee_name] <<
         1e-4, 0.0, 0.0,
-        0.0, 4.0, 0.0,
-        0.0, 0.0, 5e-1;
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 5e-2;
     ee_obs_noise[ee_name] <<
-        1e-2, 0.0,
-        0.0, 5.0;
+        4e-2, 0.0,
+        0.0, 1.0;
 }

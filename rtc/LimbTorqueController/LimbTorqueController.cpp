@@ -2982,7 +2982,7 @@ void LimbTorqueController::estimateEEVelForce()
             double eepgain_value = param.ee_pgain_p(0,0); // assuming isotropic ee impedance gain
             double eedgain_value = param.ee_dgain_p(0,0); // assuming isotropic ee impedance gain
             ee_state_coeff[ee_name] <<
-                1.0, RTC_PERIOD/virtual_ee_mass[ee_name], 0.0,
+                1.0, RTC_PERIOD/virtual_ee_mass_for_vel[ee_name], 0.0,
                 -eepgain_value*RTC_PERIOD, 1.0 - eedgain_value*RTC_PERIOD/virtual_ee_mass[ee_name], 0.0,
                 0.0, 0.0, 1.0;
             // x, y, z
@@ -3022,6 +3022,7 @@ void LimbTorqueController::estimateEEVelForce_init(const std::map<std::string, L
     }
     // set fixed values
     virtual_ee_mass[ee_name] = 20.0; //kg
+    virtual_ee_mass_for_vel[ee_name] = 5.0; //kg
     ee_obs_coeff[ee_name] <<
         1.0, 0.0, 0.0,
         0.0, 1.0, 1.0;

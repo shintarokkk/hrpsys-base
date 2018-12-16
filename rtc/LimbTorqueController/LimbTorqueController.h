@@ -413,7 +413,7 @@ private:
     // for new ee estimation: only estimate translational part
     // initially set values //mapじゃなくてもよいかも(両手に同一の値設定しているので)
     std::map<std::string, bool> eeest_initialized;
-    std::map<std::string, double> virtual_ee_mass; //used just at initialization
+    std::map<std::string, double> virtual_ee_mass, virtual_ee_mass_for_vel;
     std::map<std::string, Matrix23> ee_obs_coeff;
     std::map<std::string, hrp::Matrix33> ee_system_noise;
     std::map<std::string, Matrix22> ee_obs_noise;

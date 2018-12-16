@@ -1533,16 +1533,24 @@ void LimbTorqueController::VelocityErrorChecker()
             switch(param.amode){
                 // Free motion
             case(MANIP_FREE):{
-                hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
-                // double check_dir_vel_err = td.velocity_check_dir.dot(ref_act_eevel_diff);
-                // double other_dir_vel_err = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
-                // temporary: setting global for debugging
-                check_dir_vel_err[ee_name] = td.velocity_check_dir.dot(ref_act_eevel_diff);
-                other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
-                if (check_dir_vel_err[ee_name] > td.vel_check_thresh){
-                    ts.vel_over_thresh = true;
-                }else if (other_dir_vel_err[ee_name] > td.vel_check_limit){
-                    ts.vel_over_limit = true;
+                if(td.type == FIX){
+                    // ignoring check direction... this implemantation should be changed for other tasks than just collision detection only
+                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    if (ref_act_eevel_diff.norm() > td.vel_check_limit){
+                        ts.vel_over_limit = true;
+                    }
+                }else{
+                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    // double check_dir_vel_err = td.velocity_check_dir.dot(ref_act_eevel_diff);
+                    // double other_dir_vel_err = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    // temporary: setting global for debugging
+                    check_dir_vel_err[ee_name] = td.velocity_check_dir.dot(ref_act_eevel_diff);
+                    other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    if (check_dir_vel_err[ee_name] > td.vel_check_thresh){
+                        ts.vel_over_thresh = true;
+                    }else if (other_dir_vel_err[ee_name] > td.vel_check_limit){
+                        ts.vel_over_limit = true;
+                    }
                 }
                 break;
             } // end case manip_normal
@@ -1817,6 +1825,8 @@ void LimbTorqueController::ReferenceForceUpdater()
                             ts.init_point_vel = ts.world_pos_targ_dir.dot(filtered_ee_vel[ee_name]);
                             ts.init_point_w = ts.world_ori_targ_dir.dot(act_ee_w[ee_name]);
                         }
+                    }else{ //if type=FIX
+                        ts.F_now = hrp::dvector::Zero(6);
                     }
                 }
                 else{ // if transition is over

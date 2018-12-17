@@ -104,6 +104,11 @@ CORBA::Boolean LimbTorqueControllerService_impl::stopModeChange(const char *i_na
     return m_limbtorque->stopModeChange(std::string(i_name_));
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::startEmergency()
+{
+    return m_limbtorque->startEmergency();
+}
+
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)
 {
   m_limbtorque = i_limbtorque;

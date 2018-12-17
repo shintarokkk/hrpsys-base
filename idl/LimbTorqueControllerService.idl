@@ -71,7 +71,8 @@ module OpenHRP
         MOVE_POS,
         MOVE_ROT,
         MOVE_POSROT,
-        FIX
+        FIX,
+        MOTION_ONLY
     };
 
     /**
@@ -97,6 +98,7 @@ module OpenHRP
         double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL
         double ori_error_limit; //orientation error threshold from MANIP_CONTACT to EMERGENCY
         double emergency_recover_time; // set this to minus value for no emergency transition
+        boolean add_static_force; // whether to add static force during MANIP_FREE or not to
     };
 
     /**
@@ -237,5 +239,6 @@ module OpenHRP
     boolean getTaskState(in string name, out taskState tasks);
       boolean startModeChange(in string name);
       boolean stopModeChange(in string name);
+      boolean startEmergency();
   };
 };

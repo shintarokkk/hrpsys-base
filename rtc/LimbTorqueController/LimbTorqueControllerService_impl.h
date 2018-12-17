@@ -42,6 +42,7 @@ public:
   CORBA::Boolean getTaskState(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_);
     CORBA::Boolean startModeChange(const char *i_name_);
     CORBA::Boolean stopModeChange(const char *i_name_);
+    CORBA::Boolean startEmergency();
 
   //
   void limbtorque(LimbTorqueController *i_limbtorque);

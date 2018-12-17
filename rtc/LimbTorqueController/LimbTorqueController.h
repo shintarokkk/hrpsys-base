@@ -111,6 +111,7 @@ public:
     bool getTaskState(const std::string &i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_);
     bool startModeChange(const std::string &i_name_);
     bool stopModeChange(const std::string &i_name_);
+    bool startEmergency();
 
 protected:
 
@@ -180,7 +181,8 @@ private:
     // MOVE: シャベルを押し込んだり物を手だけ押したり
     // POS, ROT, POSROT: 目標とるすものが位置か、回転か、両方か
     // FIX: 手でものを持った体相対の位置は固定しながら歩いたり、人間の作業のためにものを支えたり
-    enum task_target_type {MOVE_POS, MOVE_ROT, MOVE_POSROT, FIX};
+    // MOTION_ONLY: 手先位置を動かすだけが目標：終了後もMOTION_ONLYでMANIP_FREEモードを継続する
+    enum task_target_type {MOVE_POS, MOVE_ROT, MOVE_POSROT, FIX, MOTION_ONLY};
     // wordings: limit->desired to be avoided | threshold->desired to reach
     struct TaskDescription{
         task_target_type type;
@@ -204,6 +206,7 @@ private:
         double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL //=cos(x/2) x is threshold in radian
         double ori_error_limit; //orientation error limit from MANIP_CONTACT to EMERGENCY //=cos(x/2) where x is limit in radian
         double emergency_recover_time; // set this to minus value for no emergency transition
+        bool add_static_force; // whether to add static force during MANIP_FREE or not to //TODO: もしかしたらtask_target_typeのMOTION_ONLY=trueと同義かも
     };
 
     // エラー等の状態
@@ -222,11 +225,11 @@ private:
         bool w_over_limit; // whether ee angular velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
         bool torque_over_limit; // whether joint torque exceeds limit or not (in MANIP_CONTACT)
         hrp::Matrix33 F_eeR; //end-effector rotation for reference force in EmergencyEECompensation
-        int f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0)
+        int f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0) //also used from add_static_force=false->add_static_force=true
         int max_f2c_t_count; //maximum value of f2c_transition_count
-        int em_transition_count; //transition to EMERGENCY: releaving reference force
+        int em_transition_count; //transition to EMERGENCY: releaving reference force  //also used from add_static_force=false->add_static_force=true
         int max_em_t_count; //maximum value of em_transition_count
-        hrp::dvector F_em_init; //F_now at the moment of emergency transition
+        hrp::dvector F_em_init; //F_now at the moment of emergency transition //also used at transition from add_static_force=false->add_static_force=true
         double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
@@ -249,6 +252,7 @@ private:
     void calcEmergencyLimbInverseDynamics(std::map<std::string, LTParam>::iterator it);
     void calcEECompensation(std::map<std::string, LTParam>::iterator it);
     void calcEmergencyEECompensation(std::map<std::string, LTParam>::iterator it);
+    void calcManipEECompensation(std::map<std::string, LTParam>::iterator it); //used in MANIP_FREE mode: can add resisting static force
     void calcContactEECompensation(std::map<std::string, LTParam>::iterator it);
     void calcNullJointDumping(std::map<std::string, LTParam>::iterator it);
     void calcEmergencyNullJointDumping(std::map<std::string, LTParam>::iterator it);
@@ -351,6 +355,7 @@ private:
 
     // emergency flags
     bool reset_emergency_flag, is_emergency;
+    bool start_emergency_called;
 
     // returns quaternion that means rotation from act to ref
     inline void safe_quaternion_comparison(const hrp::dquaternion& _q_ref, const hrp::dquaternion& _q_act, hrp::dquaternion& _q_diff)

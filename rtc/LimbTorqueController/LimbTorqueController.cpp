@@ -1357,8 +1357,7 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
     if(limb_task_target[ee_name].add_static_force){ //add static reactive force
         world_ref_wrench[ee_name] << ts.F_now.head(3), hrp::Vector3::Zero();
         ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
-        //ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
-        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]); //just for test
+        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
     }else{
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
     }

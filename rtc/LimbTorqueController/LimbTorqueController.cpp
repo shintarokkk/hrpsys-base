@@ -681,10 +681,9 @@ RTC::ReturnCode_t LimbTorqueController::onExecute(RTC::UniqueId ec_id)
         std::string ee_name = it->first;
         int arm_idx = ee_map[ee_name].ee_index;
         if(param.is_active){
-            TaskState& ts = limb_task_state[ee_name];
-            hrp::Vector3 world_ref_force = ts.F_eeR * ts.F_now.head(3);
-            for(int i=0; i<3; i++){
-                m_ref_force[arm_idx].data[i] = - world_ref_force[i]; //TODO: is sign correct???
+            for(int i=0; i<6; i++){
+                m_ref_force[arm_idx].data[i] = - world_ref_wrench[ee_name][i]; //TODO: is sign correct???
+                // m_ref_force[arm_idx].data[i] = 0.0;
             }
         }
         // need to write tm? (does not seem to be used...)
@@ -1355,19 +1354,16 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
 
     // map wrench to joint torque
     if(limb_task_target[ee_name].add_static_force){ //add static reactive force
-        hrp::dvector static_force_comp_wrench(6);
-        // if(ts.em_transition_count > 0){
-        //     //TODO: transition後に力目標値が大きく変化した場合は考えられていない(interpolatorとか使うべきかも)
-        //     // static_force_comp_wrench << (( (ts.max_em_t_count - ts.em_transition_count) / ts.max_em_t_count ) * ts.F_em_init.head(3)), hrp::Vector3::Zero();
-        //     ts.em_transition_count--;
-        //     static_force_comp_wrench << (- filtered_f_g[ee_name]), hrp::Vector3::Zero(); //just for test
-        // }else{
-        //     static_force_comp_wrench << (- filtered_f_g[ee_name]), hrp::Vector3::Zero();
-        // }
-        // ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
-        ts.F_now.head(3) = ts.F_eeR.transpose() * static_force_comp_wrench.head(3); //for autobalancer ref force //multiplying F_eeR just for compatibility of other modes  //これが悪い
-        static_force_comp_wrench << (- filtered_f_g[ee_name]), hrp::Vector3::Zero();
-        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + static_force_comp_wrench); //just for debug
+        if(ts.em_transition_count > 0){
+            //TODO: transition後に力目標値が大きく変化した場合は考えられていない(interpolatorとか使うべきかも)
+            world_ref_wrench[ee_name] << (( (ts.max_em_t_count - ts.em_transition_count) / ts.max_em_t_count ) * ts.F_em_init.head(3)), hrp::Vector3::Zero();
+            ts.em_transition_count--;
+        }else{
+            world_ref_wrench[ee_name] << (- filtered_f_g[ee_name]), hrp::Vector3::Zero();
+        }
+        ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
+        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
+        //world_ref_wrench[ee_name] << ts.F_em_init.head(3), zv3;
     }else{
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
     }
@@ -2075,7 +2071,9 @@ void LimbTorqueController::ModeSelector()
                             ts.initial_ori = act_eequat[ee_name];
                             ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
-                            ts.F_em_init = ts.F_now; // for add_static_force
+                            if(td.add_static_force){
+                                ts.F_em_init.head(3) = act_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3); //make it ee_local
+                            }
                             for(int i=0; i<param.manip->numJoints(); i++){
                                 ts.emergency_q(i) = param.manip->joint(i)->q;
                             }
@@ -2108,7 +2106,8 @@ void LimbTorqueController::ModeSelector()
                             }
                             ts.F_eeR = ref_eeR[ee_name];
                             if(td.add_static_force){
-                                ts.F_em_init = ref_eeR[ee_name].transpose() * act_eeR[ee_name] * ts.F_now;  //for transition from manip_free&add_static_force to manip_contact
+                                ts.F_em_init.head(3) = ref_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3);  //for transition from manip_free&add_static_force to manip_contact
+                                ts.F_em_init.tail(3) = hrp::Vector3::Zero();
                             }
                         }
                         //ts.vel_over_thresh = false;

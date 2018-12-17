@@ -47,6 +47,7 @@ module OpenHRP
         ArmMode amode;
         DblSequence ee_pgain;
         DblSequence ee_dgain;
+        boolean task_succeed;
     };
 
     /**

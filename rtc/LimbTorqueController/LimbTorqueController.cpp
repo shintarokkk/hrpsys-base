@@ -1,3 +1,4 @@
+//TODO: MOVE_POSROTで回転目標に#f(1 0 0 0 )が入るとセグフォするっぽい...
 #include <boost/algorithm/string.hpp> //only for iequals
 #include <rtm/CorbaNaming.h>
 #include <hrpModel/Link.h>
@@ -413,6 +414,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.world_ori_target = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
         ts.world_pos_targ_dir = hrp::Vector3(1.0, 0.0, 0.0);
         ts.world_ori_targ_dir = hrp::Vector3(1.0, 0.0, 0.0);
+        td.emergency_recover_time = 2.0;
         ts.F_now.resize(6);
         ts.F_now = hrp::dvector::Zero(6);
         ts.pos_over_limit = false;
@@ -434,6 +436,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.initial_pos = hrp::Vector3::Zero();
         ts.initial_ori = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
         ts.emergency_q.resize(p.manip->numJoints());
+        ts.task_succeed_flag = false;
         limb_task_target[ee_name] = td;
         limb_task_state[ee_name] = ts;
         release_emergency_called[ee_name] = false;
@@ -2440,6 +2443,7 @@ void LimbTorqueController::copyLimbTorqueControllerParam(LimbTorqueControllerSer
     case 5:
         i_param_.amode = OpenHRP::LimbTorqueControllerService::EMERGENCY;
     }
+    i_param_.task_succeed = param.task_succeed;
 }
 
 bool LimbTorqueController::getLimbTorqueControllerParam(const std::string& i_name_, LimbTorqueControllerService::limbtorqueParam& i_param_)

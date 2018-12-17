@@ -95,6 +95,7 @@ module OpenHRP
         double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
         double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL
         double ori_error_limit; //orientation error threshold from MANIP_CONTACT to EMERGENCY
+        double emergency_recover_time; // set this to minus value for no emergency transition
     };
 
     /**
@@ -125,7 +126,8 @@ module OpenHRP
         DblSequence3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         DblSequence initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         DblSequence emergency_q; //joint angles at the moment of transition to emrgency mode
-    }                           ;
+        boolean task_succeed_flag; //set true after succeed threshold is exceeded: LTParam.task_succeeded will be set true after transition to emergency is over
+    };
 
     /**
      * @struct collisionStatus

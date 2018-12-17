@@ -161,6 +161,7 @@ private:
         arm_mode amode;
         hrp::Matrix33 ee_pgain_p, ee_pgain_r;
         hrp::Matrix33 ee_dgain_p, ee_dgain_r;
+        bool task_succeed; //whether task succeeded or not: become true after transition to emergency
     };
     struct ee_trans {
         std::string target_name;
@@ -202,9 +203,10 @@ private:
         double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
         double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL //=cos(x/2) x is threshold in radian
         double ori_error_limit; //orientation error limit from MANIP_CONTACT to EMERGENCY //=cos(x/2) where x is limit in radian
+        double emergency_recover_time; // set this to minus value for no emergency transition
     };
 
-    // MANIP_FREE, MANIP_CONTACTモード中に更新していくエラー等の状態->やっぱり全てのモードで使う
+    // エラー等の状態
     struct TaskState{
         hrp::Vector3 world_pos_target; //ee position target in MANIP_CONTACT
         hrp::dquaternion world_ori_target; //ee orientation target in MANIP_CONTACT
@@ -229,6 +231,7 @@ private:
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         hrp::dvector emergency_q; //joint angles at the moment of transition to emrgency mode
+        bool task_succeed_flag; //set true after succeed threshold is exceeded: LTParam.task_succeeded will be set true after transition to emergency is over
     };
     std::map<std::string, TaskDescription> limb_task_target;
     std::map<std::string, TaskState> limb_task_state;
@@ -396,6 +399,7 @@ private:
         _ts.vel_over_limit = false;
         _ts.w_over_limit = false;
         _ts.torque_over_limit = false;
+        _ts.task_succeed_flag = false;
         _ts.em_transition_count = 0;
         _ts.f2c_transition_count = 0;
     }

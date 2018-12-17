@@ -332,6 +332,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         p.ee_pgain_r = ee_pgainr_vec.asDiagonal();
         p.ee_dgain_p = ee_dgainp_vec.asDiagonal();
         p.ee_dgain_r = ee_dgainr_vec.asDiagonal();
+        p.task_succeed = false;
         m_lt_param[ee_name] = p;
         m_ref_lt_param[ee_name] = p_ref;
 
@@ -426,7 +427,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.f2c_transition_count = 0;
         ts.max_f2c_t_count = 500;
         ts.em_transition_count = 0;
-        ts.max_em_t_count = 300;
+        ts.max_em_t_count = -1;
         ts.F_em_init.resize(6);
         ts.init_point_vel = 0.0;
         ts.init_point_w = 0.0;
@@ -1873,12 +1874,14 @@ void LimbTorqueController::ReferenceForceUpdater()
     }
 }
 
+//TODO: 片手だけEMERGENCYの時とかあまりしっかり作れていない気がする
 void LimbTorqueController::ModeSelector()
 {
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
     bool change_to_contact = false; //for two arms
     bool change_to_emergency = false; //for two arms
     bool change_to_idle = false; //for two arms
+    bool dual_task_succeed = false; //for two arms
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
         std::string ee_name = it->first;
@@ -1955,6 +1958,7 @@ void LimbTorqueController::ModeSelector()
                             reset_taskstate_bool(ts);
                             ts.initial_pos = act_eepos[ee_name];
                             ts.initial_ori = act_eequat[ee_name];
+                            ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
                             ts.F_em_init = ts.F_now;
                             for(int i=0; i<param.manip->numJoints(); i++){
@@ -2025,6 +2029,7 @@ void LimbTorqueController::ModeSelector()
                             reset_taskstate_bool(ts);
                             ts.initial_pos = act_eepos[ee_name];
                             ts.initial_ori = act_eequat[ee_name];
+                            ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
                             ts.F_em_init = ts.F_now;
                             for(int i=0; i<param.manip->numJoints(); i++){
@@ -2041,17 +2046,20 @@ void LimbTorqueController::ModeSelector()
                                 std::cout << "Reach Task Goal!!!!!!!!" << std::endl;
                             }
                             if(td.dual){
-                                change_to_emergency = true; //TODO: concider abount this
+                                change_to_emergency = true;
+                                dual_task_succeed = true;
                             }else{
                                 param.amode = EMERGENCY;
                                 reset_taskstate_bool(ts);
                                 ts.initial_pos = act_eepos[ee_name];
                                 ts.initial_ori = act_eequat[ee_name];
+                                ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                                 ts.em_transition_count = ts.max_em_t_count;
                                 ts.F_em_init = ts.F_now;
                                 for(int i=0; i<param.manip->numJoints(); i++){
                                     ts.emergency_q(i) = param.manip->joint(i)->q;
                                 }
+                                ts.task_succeed_flag = true;
                             }
                         }else if((td.type == MOVE_POSROT || td.type == MOVE_ROT) && ts.ori_reach_target){
                             for(int i=0; i<100; i++){
@@ -2059,17 +2067,20 @@ void LimbTorqueController::ModeSelector()
                                 std::cout << "Reach Task Goal!!!!!!!!" << std::endl;
                             }
                             if(td.dual){
-                                change_to_emergency = true; //TODO: concider abount this
+                                change_to_emergency = true;
+                                dual_task_succeed = true;
                             }else{
                                 param.amode = EMERGENCY;
                                 reset_taskstate_bool(ts);
                                 ts.initial_pos = act_eepos[ee_name];
                                 ts.initial_ori = act_eequat[ee_name];
+                                ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                                 ts.em_transition_count = ts.max_em_t_count;
                                 ts.F_em_init = ts.F_now;
                                 for(int i=0; i<param.manip->numJoints(); i++){
                                     ts.emergency_q(i) = param.manip->joint(i)->q;
                                 }
+                                ts.task_succeed_flag = true;
                             }
                         }
                         //ts.pos_reach_target = false; //reach_targetはeusが見る
@@ -2081,6 +2092,9 @@ void LimbTorqueController::ModeSelector()
                     }
                     //TODO: make recovery from emregency mode...velocity check?
                     if(ts.em_transition_count <= 0){
+                        if (ts.task_succeed_flag){
+                            param.task_succeed = true; //releaseが呼ばれるまでtrue保持 //transition_countは両手とも同時にデクリメントされるのでここだけでよい
+                        }
                         //eusからの指令待機
                         if (release_emergency_called[ee_name]){
                             reset_emergency_flag = true;
@@ -2093,6 +2107,7 @@ void LimbTorqueController::ModeSelector()
                                 ts.F_now = hrp::dvector::Zero(6);
                                 reset_taskstate_bool(ts);
                                 release_emergency_called[ee_name] = false;
+                                param.task_succeed = false; //reset
                             }
                         }
                     }
@@ -2125,6 +2140,7 @@ void LimbTorqueController::ModeSelector()
                     ts.emergency_q(i) = param.manip->joint(i)->q;
                 }
                 ts.F_eeR = ref_eeR[ee_name];
+                ts.task_succeed_flag = true;
             }else if(change_to_emergency){
                 if(param.amode == MANIP_FREE){
                     ts.F_eeR = act_eeR[ee_name];
@@ -2145,6 +2161,7 @@ void LimbTorqueController::ModeSelector()
                 ts.F_now = hrp::dvector::Zero(6);
                 release_emergency_called[ee_name] = false;
                 reset_taskstate_bool(ts);
+                param.task_succeed = false; //reset
             }
         }
         it++;
@@ -2748,28 +2765,30 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     default:
         break;
     }
-    limb_task_target[name].dual = task_description.dual;
+    TaskDescription& td = limb_task_target[name];
+    td.dual = task_description.dual;
     // set task descriptions
-    limb_task_target[name].velocity_check_dir.normalize();
-    limb_task_target[name].target_velocity = task_description.target_velocity;
+    td.velocity_check_dir.normalize();
+    td.target_velocity = task_description.target_velocity;
     for(int i=0; i<6; i++){
-        limb_task_target[name].F_init(i) = task_description.F_init[i];
+        td.F_init(i) = task_description.F_init[i];
     }
-    limb_task_target[name].vel_force_gain = task_description.vel_force_gain;
-    limb_task_target[name].w_force_gain = task_description.w_force_gain;
+    td.vel_force_gain = task_description.vel_force_gain;
+    td.w_force_gain = task_description.w_force_gain;
     for(int i=0; i<3; i++){
-        limb_task_target[name].velocity_check_dir(i) = task_description.velocity_check_dir[i];
-        limb_task_target[name].rel_pos_target(i) = task_description.rel_pos_target[i];
+        td.velocity_check_dir(i) = task_description.velocity_check_dir[i];
+        td.rel_pos_target(i) = task_description.rel_pos_target[i];
     }
-    limb_task_target[name].rel_ori_target = hrp::dquaternion(task_description.rel_ori_target[0], task_description.rel_ori_target[1], task_description.rel_ori_target[2], task_description.rel_ori_target[3]);
-    limb_task_target[name].vel_check_thresh = task_description.vel_check_thresh;
-    limb_task_target[name].vel_check_limit = task_description.vel_check_limit;
-    limb_task_target[name].cont_vel_error_limit = task_description.cont_vel_error_limit;
-    limb_task_target[name].cont_w_error_limit = task_description.cont_w_error_limit;
-    limb_task_target[name].pos_target_thresh = task_description.pos_target_thresh;
-    limb_task_target[name].pos_error_limit = task_description.pos_error_limit;
-    limb_task_target[name].ori_target_thresh = task_description.ori_target_thresh;
-    limb_task_target[name].ori_error_limit = task_description.ori_error_limit;
+    td.rel_ori_target = hrp::dquaternion(task_description.rel_ori_target[0], task_description.rel_ori_target[1], task_description.rel_ori_target[2], task_description.rel_ori_target[3]);
+    td.vel_check_thresh = task_description.vel_check_thresh;
+    td.vel_check_limit = task_description.vel_check_limit;
+    td.cont_vel_error_limit = task_description.cont_vel_error_limit;
+    td.cont_w_error_limit = task_description.cont_w_error_limit;
+    td.pos_target_thresh = task_description.pos_target_thresh;
+    td.pos_error_limit = task_description.pos_error_limit;
+    td.ori_target_thresh = task_description.ori_target_thresh;
+    td.ori_error_limit = task_description.ori_error_limit;
+    td.emergency_recover_time = task_description.emergency_recover_time;
     // initialize task state
     reset_taskstate_bool(limb_task_state[name]);
     m_lt_param[name].amode = MANIP_FREE; //automatically set to manip_normal (is this ok?)
@@ -2812,6 +2831,7 @@ void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerServ
         std::cout << "param.rel_ori_target.vec()(" << i << ") = " << param.rel_ori_target.vec()(i) << std::endl;
         std::cout << "i_taskd_.rel_ori_target[" << i+1 << "] = " << i_taskd_.rel_ori_target[i+1] << std::endl;
     }
+    i_taskd_.emergency_recover_time = param.emergency_recover_time;
 }
 
 bool LimbTorqueController::getTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_)
@@ -2868,6 +2888,7 @@ void LimbTorqueController::copyTaskState(OpenHRP::LimbTorqueControllerService::t
     for(int i=0; i<param.emergency_q.size(); i++){
         i_tasks_.emergency_q[i] = param.emergency_q(i);
     }
+    i_tasks_.task_succeed_flag = param.task_succeed_flag;
 }
 
 bool LimbTorqueController::getTaskState(const std::string &i_name_, OpenHRP::LimbTorqueControllerService::taskState_out i_tasks_)

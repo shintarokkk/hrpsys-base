@@ -1359,7 +1359,7 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
             world_ref_wrench[ee_name] << (( (ts.max_em_t_count - ts.em_transition_count) / ts.max_em_t_count ) * ts.F_em_init.head(3)), hrp::Vector3::Zero();
             ts.em_transition_count--;
         }else{
-            world_ref_wrench[ee_name] << (- filtered_f_g[ee_name]), hrp::Vector3::Zero();
+            world_ref_wrench[ee_name] << (- filtered_f_s[ee_name]), hrp::Vector3::Zero();
         }
         ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
@@ -2365,8 +2365,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_udqw[ee_name]) << micro_time;
                     // new eeest
                     *(debug_filtereevel[ee_name]) << micro_time;
-                    *(debug_filtereef_ie[ee_name]) << micro_time;
-                    *(debug_filtereef_g[ee_name]) << micro_time;
+                    *(debug_filtereef_d[ee_name]) << micro_time;
+                    *(debug_filtereef_s[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2413,8 +2413,8 @@ void LimbTorqueController::DebugOutput()
                         *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
                         *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
                         *(debug_filtereevel[ee_name]) << " " << filtered_ee_vel[ee_name](i);
-                        *(debug_filtereef_ie[ee_name]) << " " << filtered_f_ie[ee_name](i);
-                        *(debug_filtereef_g[ee_name]) << " " << filtered_f_g[ee_name](i);
+                        *(debug_filtereef_d[ee_name]) << " " << filtered_f_d[ee_name](i);
+                        *(debug_filtereef_s[ee_name]) << " " << filtered_f_s[ee_name](i);
                     }
                     for (int i=0; i<3; i++){
                         *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
@@ -2468,8 +2468,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_udqw[ee_name]) << std::endl;
                     *(debug_wrw[ee_name]) << std::endl;
                     *(debug_filtereevel[ee_name]) << std::endl;
-                    *(debug_filtereef_ie[ee_name]) << std::endl;
-                    *(debug_filtereef_g[ee_name]) << std::endl;
+                    *(debug_filtereef_d[ee_name]) << std::endl;
+                    *(debug_filtereef_s[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2806,8 +2806,8 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_udqw[ee_name] = new std::ofstream((logpath + std::string("udqw.dat")).c_str());
                 debug_wrw[ee_name] = new std::ofstream((logpath + std::string("world_refwrench.dat")).c_str());
                 debug_filtereevel[ee_name] = new std::ofstream((logpath + std::string("filter_eevel.dat")).c_str());
-                debug_filtereef_ie[ee_name] = new std::ofstream((logpath + std::string("filter_eef_ie.dat")).c_str());
-                debug_filtereef_g[ee_name] = new std::ofstream((logpath + std::string("filter_eef_g.dat")).c_str());
+                debug_filtereef_d[ee_name] = new std::ofstream((logpath + std::string("filter_eef_d.dat")).c_str());
+                debug_filtereef_s[ee_name] = new std::ofstream((logpath + std::string("filter_eef_s.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2872,8 +2872,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_udqw[ee_name];
                 delete debug_wrw[ee_name];
                 delete debug_filtereevel[ee_name];
-                delete debug_filtereef_ie[ee_name];
-                delete debug_filtereef_g[ee_name];
+                delete debug_filtereef_d[ee_name];
+                delete debug_filtereef_s[ee_name];
             }
         }
         it++;
@@ -2936,7 +2936,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     if(td.add_static_force){
         ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
         ts.em_transition_count = ts.max_em_t_count;
-        ts.F_em_init.head(3) = - filtered_f_g[name];
+        ts.F_em_init.head(3) = - filtered_f_s[name];
     }
     // initialize task state
     reset_taskstate_bool(ts);
@@ -3201,8 +3201,8 @@ void LimbTorqueController::estimateEEVelForce()
             // reorganize variants into screw and wrench
             for(int i=0; i<3; i++){
                 filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0);
-                filtered_f_ie[ee_name](i) = ee_state_est[ee_name][i](1);
-                filtered_f_g[ee_name](i) = ee_state_est[ee_name][i](2);
+                filtered_f_d[ee_name](i) = ee_state_est[ee_name][i](1);
+                filtered_f_s[ee_name](i) = ee_state_est[ee_name][i](2);
             }
         }
         it++;

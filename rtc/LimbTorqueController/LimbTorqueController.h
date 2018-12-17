@@ -431,11 +431,11 @@ private:
     std::map<std::string, std::vector<hrp::Vector3> > ee_state_est;
     std::map<std::string, std::vector<hrp::Matrix33> > ee_error_covar;
     // reordered estimate values
-    std::map<std::string, hrp::Vector3> filtered_ee_vel, filtered_f_ie, filtered_f_g;
+    std::map<std::string, hrp::Vector3> filtered_ee_vel, filtered_f_d, filtered_f_s;
     void estimateEEVelForce();
     void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 
-    std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_ie, debug_filtereef_g;
+    std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_d, debug_filtereef_s;
 };
 
 extern "C"

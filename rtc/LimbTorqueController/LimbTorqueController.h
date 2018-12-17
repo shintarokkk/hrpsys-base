@@ -436,6 +436,7 @@ private:
     void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
 
     std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_d, debug_filtereef_s;
+    std::map<std::string, std::ofstream*> debug_act_torque;
 };
 
 extern "C"

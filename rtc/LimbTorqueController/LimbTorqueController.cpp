@@ -1354,16 +1354,9 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
 
     // map wrench to joint torque
     if(limb_task_target[ee_name].add_static_force){ //add static reactive force
-        if(ts.em_transition_count > 0){
-            //TODO: transition後に力目標値が大きく変化した場合は考えられていない(interpolatorとか使うべきかも)
-            world_ref_wrench[ee_name] << (( (ts.max_em_t_count - ts.em_transition_count) / ts.max_em_t_count ) * ts.F_em_init.head(3)), hrp::Vector3::Zero();
-            ts.em_transition_count--;
-        }else{
-            world_ref_wrench[ee_name] << (- filtered_f_s[ee_name]), hrp::Vector3::Zero();
-        }
+        world_ref_wrench[ee_name] << ts.F_now.head(3), hrp::Vector3::Zero();
         ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
-        //world_ref_wrench[ee_name] << ts.F_em_init.head(3), zv3;
     }else{
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
     }
@@ -1853,13 +1846,15 @@ void LimbTorqueController::ActualTorqueChecker()
             hrp::JointPathExPtr manip = param.manip;
             int limbdof = manip->numJoints();
             for (int i = 0; i<limbdof; i++){
-                int jid = m_robot->joint(i)->jointId;
+                int jid = manip->joint(i)->jointId;
                 hrp::Link* current_joint = m_robot->joint(jid);
                 //double max_torque = current_joint->climit * current_joint->gearRatio * current_joint->torqueConst;
-                double max_torque = 1.2 * reference_climit(jid) * current_joint->gearRatio * current_joint->torqueConst; //limiting actual by reduced limit for safety
+                double max_torque = 0.7 * current_joint->climit * current_joint->gearRatio * current_joint->torqueConst; //limiting actual by reduced limit for safety
                 if (actual_torque_vector(jid) > max_torque){
+                    std::cout << "Actual torque over limit: max = " << max_torque << ", current = " << actual_torque_vector(jid) << std::endl;
                     limb_task_state[ee_name].torque_over_limit = true;
                 }else if (actual_torque_vector(jid) < -max_torque){
+                    std::cout << "Actual torque over limit: min = " << -max_torque << ", current = " << actual_torque_vector(jid) << std::endl;
                     limb_task_state[ee_name].torque_over_limit = true;
                 }
             } //end for
@@ -1979,7 +1974,9 @@ void LimbTorqueController::ReferenceForceUpdater()
                         break;
                     } //end switch task type
                 }
-            } //end if MANIP_CONTACT
+            } else if(param.amode == MANIP_FREE && td.add_static_force){  //end if MANIP_CONTACT
+                ts.F_now.head(3) = ts.F_now.head(3) + 0.01 * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
+            }
         } //end if param is active
         it++;
     }
@@ -2367,6 +2364,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_filtereevel[ee_name]) << micro_time;
                     *(debug_filtereef_d[ee_name]) << micro_time;
                     *(debug_filtereef_s[ee_name]) << micro_time;
+                    *(debug_act_torque[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2421,14 +2419,16 @@ void LimbTorqueController::DebugOutput()
                         *(debug_acteewrench[ee_name]) << " " << abs_moments[param.sensor_name](i);
                     }
                     for (int i=0; i<limbdof; i++){
+                        int jid = manip->joint(i)->jointId;
                         *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
                         *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
-                        *(debug_reftq[ee_name]) << " " << reference_torque(manip->joint(i)->jointId);
-                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(manip->joint(i)->jointId);
-                        *(debug_dqact[ee_name]) << " " << m_robot->joint(manip->joint(i)->jointId)->dq;
-                        *(debug_qest[ee_name]) << " " << log_est_q(manip->joint(i)->jointId);
-                        *(debug_qact[ee_name]) << " " << log_act_q(manip->joint(i)->jointId);
-                        *(debug_qref[ee_name]) << " " << log_ref_q(manip->joint(i)->jointId);
+                        *(debug_reftq[ee_name]) << " " << reference_torque(jid);
+                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(jid);
+                        *(debug_dqact[ee_name]) << " " << m_robot->joint(jid)->dq;
+                        *(debug_qest[ee_name]) << " " << log_est_q(jid);
+                        *(debug_qact[ee_name]) << " " << log_act_q(jid);
+                        *(debug_qref[ee_name]) << " " << log_ref_q(jid);
+                        *(debug_act_torque[ee_name]) << " " << actual_torque_vector(jid);
                     }
                     *(debug_cdve[ee_name]) << " " << check_dir_vel_err[ee_name];
                     *(debug_odve[ee_name]) << " " << other_dir_vel_err[ee_name];
@@ -2470,6 +2470,7 @@ void LimbTorqueController::DebugOutput()
                     *(debug_filtereevel[ee_name]) << std::endl;
                     *(debug_filtereef_d[ee_name]) << std::endl;
                     *(debug_filtereef_s[ee_name]) << std::endl;
+                    *(debug_act_torque[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2808,6 +2809,7 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_filtereevel[ee_name] = new std::ofstream((logpath + std::string("filter_eevel.dat")).c_str());
                 debug_filtereef_d[ee_name] = new std::ofstream((logpath + std::string("filter_eef_d.dat")).c_str());
                 debug_filtereef_s[ee_name] = new std::ofstream((logpath + std::string("filter_eef_s.dat")).c_str());
+                debug_act_torque[ee_name] = new std::ofstream((logpath + std::string("act_torque.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2874,6 +2876,7 @@ bool LimbTorqueController::stopLog()
                 delete debug_filtereevel[ee_name];
                 delete debug_filtereef_d[ee_name];
                 delete debug_filtereef_s[ee_name];
+                delete debug_act_torque[ee_name];
             }
         }
         it++;
@@ -2934,9 +2937,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     td.add_static_force = task_description.add_static_force;
     // if add_static_force, start force transition
     if(td.add_static_force){
-        ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
-        ts.em_transition_count = ts.max_em_t_count;
-        ts.F_em_init.head(3) = - filtered_f_s[name];
+        ts.F_now = hrp::dvector6::Zero();
     }
     // initialize task state
     reset_taskstate_bool(ts);

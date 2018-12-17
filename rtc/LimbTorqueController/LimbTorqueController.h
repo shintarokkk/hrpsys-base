@@ -207,6 +207,7 @@ private:
         double ori_error_limit; //orientation error limit from MANIP_CONTACT to EMERGENCY //=cos(x/2) where x is limit in radian
         double emergency_recover_time; // set this to minus value for no emergency transition
         bool add_static_force; // whether to add static force during MANIP_FREE or not to //TODO: もしかしたらtask_target_typeのMOTION_ONLY=trueと同義かも
+        double static_rfu_gain;
     };
 
     // エラー等の状態

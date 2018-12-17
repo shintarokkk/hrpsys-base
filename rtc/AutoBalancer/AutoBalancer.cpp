@@ -2029,6 +2029,7 @@ void AutoBalancer::static_balance_point_proc_one(hrp::Vector3& tmp_input_sbp, co
     calc_static_balance_point_from_forces(target_sbp, tmpcog, ref_com_height);
     tmp_input_sbp = target_sbp - sbp_offset;
     sbp_cog_offset = tmp_input_sbp - tmpcog;
+    tmp_input_sbp = tmpcog;
   }
 };
 

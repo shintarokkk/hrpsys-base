@@ -99,6 +99,7 @@ module OpenHRP
         double ori_error_limit; //orientation error threshold from MANIP_CONTACT to EMERGENCY
         double emergency_recover_time; // set this to minus value for no emergency transition
         boolean add_static_force; // whether to add static force during MANIP_FREE or not to
+        double static_rfu_gain;
     };
 
     /**

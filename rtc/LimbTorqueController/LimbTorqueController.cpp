@@ -416,6 +416,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.world_ori_targ_dir = hrp::Vector3(1.0, 0.0, 0.0);
         td.emergency_recover_time = 2.0;
         td.add_static_force = false;
+        td.static_rfu_gain = 0.01;
         ts.F_now.resize(6);
         ts.F_now = hrp::dvector::Zero(6);
         ts.pos_over_limit = false;
@@ -1356,7 +1357,8 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
     if(limb_task_target[ee_name].add_static_force){ //add static reactive force
         world_ref_wrench[ee_name] << ts.F_now.head(3), hrp::Vector3::Zero();
         ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
-        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
+        //ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
+        ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]); //just for test
     }else{
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name]);
     }
@@ -1975,7 +1977,7 @@ void LimbTorqueController::ReferenceForceUpdater()
                     } //end switch task type
                 }
             } else if(param.amode == MANIP_FREE && td.add_static_force){  //end if MANIP_CONTACT
-                ts.F_now.head(3) = ts.F_now.head(3) + 0.01 * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
+                ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
             }
         } //end if param is active
         it++;
@@ -2935,6 +2937,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     td.ori_error_limit = task_description.ori_error_limit;
     td.emergency_recover_time = task_description.emergency_recover_time;
     td.add_static_force = task_description.add_static_force;
+    td.static_rfu_gain = task_description.static_rfu_gain;
     // if add_static_force, start force transition
     if(td.add_static_force){
         ts.F_now = hrp::dvector6::Zero();
@@ -2985,6 +2988,7 @@ void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerServ
     }
     i_taskd_.emergency_recover_time = param.emergency_recover_time;
     i_taskd_.add_static_force = param.add_static_force;
+    i_taskd_.static_rfu_gain = param.static_rfu_gain;
 }
 
 bool LimbTorqueController::getTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_)

@@ -126,7 +126,7 @@ module OpenHRP
         long em_transition_count; //transition from EMERGENCY to IDLE_NORMAL
         long max_em_t_count; //maximum value of em_transition_count
         DblSequence F_em_init; //F_now at the moment of emergency transition
-        double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
+        double init_point_w; //ee velocity to target direction at the time F_now reached F_init
         DblSequence3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         DblSequence initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         DblSequence emergency_q; //joint angles at the moment of transition to emrgency mode
@@ -241,5 +241,6 @@ module OpenHRP
       boolean startModeChange(in string name);
       boolean stopModeChange(in string name);
       boolean startEmergency();
+      boolean checkEmergencyFlag(in string name, out boolean flag);
   };
 };

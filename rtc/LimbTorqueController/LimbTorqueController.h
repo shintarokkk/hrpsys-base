@@ -112,6 +112,7 @@ public:
     bool startModeChange(const std::string &i_name_);
     bool stopModeChange(const std::string &i_name_);
     bool startEmergency();
+    bool checkEmergencyFlag(const std::string& i_name_, bool& i_flag_);
 
 protected:
 
@@ -231,7 +232,7 @@ private:
         int em_transition_count; //transition to EMERGENCY: releaving reference force  //also used from add_static_force=false->add_static_force=true
         int max_em_t_count; //maximum value of em_transition_count
         hrp::dvector F_em_init; //F_now at the moment of emergency transition //also used at transition from add_static_force=false->add_static_force=true
-        double init_point_vel, init_point_w; //ee velocity to target direction at the time F_now reached F_init
+        double init_point_w; //ee velocity to target direction at the time F_now reached F_init //TODO: これ消す(使わないので)
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         hrp::dvector emergency_q; //joint angles at the moment of transition to emrgency mode

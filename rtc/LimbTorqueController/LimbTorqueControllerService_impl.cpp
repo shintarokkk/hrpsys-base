@@ -109,6 +109,11 @@ CORBA::Boolean LimbTorqueControllerService_impl::startEmergency()
     return m_limbtorque->startEmergency();
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::checkEmergencyFlag(const char *i_name_, CORBA::Boolean_out i_flag_)
+{
+    return m_limbtorque->checkEmergencyFlag(std::string(i_name_), i_flag_);
+}
+
 void LimbTorqueControllerService_impl::limbtorque(LimbTorqueController *i_limbtorque)
 {
   m_limbtorque = i_limbtorque;

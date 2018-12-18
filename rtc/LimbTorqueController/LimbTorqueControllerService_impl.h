@@ -43,6 +43,7 @@ public:
     CORBA::Boolean startModeChange(const char *i_name_);
     CORBA::Boolean stopModeChange(const char *i_name_);
     CORBA::Boolean startEmergency();
+    CORBA::Boolean checkEmergencyFlag(const char *i_name_, CORBA::Boolean_out i_flag_);
 
   //
   void limbtorque(LimbTorqueController *i_limbtorque);

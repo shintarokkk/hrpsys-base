@@ -438,6 +438,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ts.initial_ori = hrp::dquaternion(1.0, 0.0, 0.0, 0.0);
         ts.emergency_q.resize(p.manip->numJoints());
         ts.task_succeed_flag = false;
+        ts.remove_static_force_count = 0;
+        max_rsfc = std::floor(1.5 / RTC_PERIOD); //max remove static force time
         limb_task_target[ee_name] = td;
         limb_task_state[ee_name] = ts;
         release_emergency_called[ee_name] = false;
@@ -1353,7 +1355,7 @@ void LimbTorqueController::calcManipEECompensation(std::map<std::string, LTParam
     ee_vel_w_comp_wrench[ee_name] << ee_vel_comp_force[ee_name], ee_w_comp_moment[ee_name];
 
     // map wrench to joint torque
-    if(limb_task_target[ee_name].add_static_force){ //add static reactive force
+    if(limb_task_target[ee_name].add_static_force || ts.remove_static_force_count > 0){ //add static reactive force or transition from add_static_force=true->false
         world_ref_wrench[ee_name] << ts.F_now.head(3), hrp::Vector3::Zero();
         ts.F_eeR = act_eeR[ee_name]; //just in order for transition to emergency to be continuous
         ee_compensation_torque[ee_name] = act_ee_jacobian[ee_name].transpose() * (ee_pos_ori_comp_wrench[ee_name] + ee_vel_w_comp_wrench[ee_name] + world_ref_wrench[ee_name]);
@@ -1958,6 +1960,13 @@ void LimbTorqueController::ReferenceForceUpdater()
             } //end if MANIP_CONTACT
             else if(param.amode == MANIP_FREE && td.add_static_force){
                 ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
+            }else if(ts.remove_static_force_count > 0){
+                double redu_rate = (static_cast<double>(ts.remove_static_force_count) / static_cast<double>(max_rsfc));
+                ts.F_now.head(3) =  redu_rate * ts.F_em_init.head(3);
+                ts.remove_static_force_count--;
+                if(ts.remove_static_force_count == 0){
+                    td.add_static_force = false;
+                }
             }
         } //end if param is active
         it++;
@@ -2066,8 +2075,9 @@ void LimbTorqueController::ModeSelector()
                             ts.initial_ori = act_eequat[ee_name];
                             ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
-                            if(td.add_static_force){
-                                ts.F_em_init.head(3) = act_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3); //make it ee_local
+                            if(td.add_static_force || ts.remove_static_force_count > 0){
+                                ts.F_em_init.head(3) = act_eeR[ee_name].transpose() * ts.F_now.head(3); //make it ee_local
+                                ts.remove_static_force_count = 0;
                             }
                             for(int i=0; i<param.manip->numJoints(); i++){
                                 ts.emergency_q(i) = param.manip->joint(i)->q;
@@ -2100,9 +2110,10 @@ void LimbTorqueController::ModeSelector()
                             reset_taskstate_bool(ts);
                             ts.f2c_transition_count = ts.max_f2c_t_count;
                             ts.F_eeR = ref_eeR[ee_name];
-                            if(td.add_static_force){
-                                ts.F_em_init.head(3) = ref_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3);  //for transition from manip_free&add_static_force to manip_contact
+                            if(td.add_static_force || ts.remove_static_force_count > 0){
+                                ts.F_em_init.head(3) = ref_eeR[ee_name].transpose() * ts.F_now.head(3);  //for transition from manip_free&add_static_force to manip_contact
                                 ts.F_em_init.tail(3) = hrp::Vector3::Zero();
+                                ts.remove_static_force_count = 0;
                             }
                         }
                     }
@@ -2143,6 +2154,7 @@ void LimbTorqueController::ModeSelector()
                             ts.initial_ori = act_eequat[ee_name];
                             ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
+                            ts.remove_static_force_count = 0;
                             ts.F_em_init = ts.F_now;
                             for(int i=0; i<param.manip->numJoints(); i++){
                                 ts.emergency_q(i) = param.manip->joint(i)->q;
@@ -2169,6 +2181,7 @@ void LimbTorqueController::ModeSelector()
                                 reset_taskstate_bool(ts);
                                 ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                                 ts.em_transition_count = ts.max_em_t_count;
+                                ts.remove_static_force_count = 0;
                                 ts.F_em_init = ts.F_now;
                                 ts.task_succeed_flag = true;
                             }
@@ -2192,6 +2205,7 @@ void LimbTorqueController::ModeSelector()
                                 reset_taskstate_bool(ts);
                                 ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                                 ts.em_transition_count = ts.max_em_t_count;
+                                ts.remove_static_force_count = 0;
                                 ts.F_em_init = ts.F_now;
                                 ts.task_succeed_flag = true;
                             }
@@ -2253,15 +2267,17 @@ void LimbTorqueController::ModeSelector()
                 reset_taskstate_bool(ts);
                 ts.f2c_transition_count = ts.max_f2c_t_count;
                 ts.F_eeR = ref_eeR[ee_name];
-                if(td.add_static_force){
-                    ts.F_em_init.head(3) = ref_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3);  //for transition from manip_free&add_static_force to manip_contact
+                if(td.add_static_force || ts.remove_static_force_count > 0){
+                    ts.F_em_init.head(3) = ref_eeR[ee_name].transpose() * ts.F_now.head(3);  //for transition from manip_free&add_static_force to manip_contact
                     ts.F_em_init.tail(3) = hrp::Vector3::Zero();
+                    ts.remove_static_force_count = 0;
                 }
             }else if(change_to_emergency){
                 if(param.amode == MANIP_FREE){
                     ts.F_eeR = act_eeR[ee_name];
-                    if(td.add_static_force){
-                        ts.F_em_init.head(3) = act_eeR[ee_name].transpose() * world_ref_wrench[ee_name].head(3); //make it ee_local
+                    if(td.add_static_force || ts.remove_static_force_count > 0){
+                        ts.F_em_init.head(3) = act_eeR[ee_name].transpose() * ts.F_now.head(3); //make it ee_local
+                        ts.remove_static_force_count = 0;
                     }
                 }
                 reset_taskstate_bool(ts);
@@ -2269,6 +2285,7 @@ void LimbTorqueController::ModeSelector()
                 ts.initial_ori = act_eequat[ee_name];
                 ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                 ts.em_transition_count = ts.max_em_t_count;
+                ts.remove_static_force_count = 0;
                 ts.F_em_init = ts.F_now;
                 for(int i=0; i<param.manip->numJoints(); i++){
                     ts.emergency_q(i) = param.manip->joint(i)->q;
@@ -2287,6 +2304,7 @@ void LimbTorqueController::ModeSelector()
                 reset_taskstate_bool(ts);
                 ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                 ts.em_transition_count = ts.max_em_t_count;
+                ts.remove_static_force_count = 0;
                 ts.F_em_init = ts.F_now;
                 ts.task_succeed_flag = true;
             }
@@ -2895,25 +2913,34 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
         std::cerr << "[" << m_profile.instance_name << "] Could not find limb torque controller param [" << name << "]" << std::endl;
         return false;
     }
-    switch(task_description.type){
-    case(MOVE_POS):
-        limb_task_target[name].type = MOVE_POS;
-        break;
-    case(MOVE_ROT):
-        limb_task_target[name].type = MOVE_ROT;
-        break;
-    case(MOVE_POSROT):
-        limb_task_target[name].type = MOVE_POSROT;
-        break;
-    case(FIX):
-        limb_task_target[name].type = FIX;
-        break;
-    case(MOTION_ONLY):
-        limb_task_target[name].type = MOTION_ONLY;
-        break;
-    }
     TaskDescription& td = limb_task_target[name];
     TaskState& ts = limb_task_state[name];
+    bool static_force_is_added = false;
+    if( ts.f2c_transition_count > 0 || ts.em_transition_count > 0 || ts.remove_static_force_count > 0){
+        std::cerr << "[" << m_profile.instance_name << "] You must not call giveTaskdescription while transition!! fail:  [" << name << "]" << std::endl;
+        return false;
+    }
+    if( !ts.task_succeed_flag && m_lt_param[name].amode == MANIP_CONTACT ){
+        std::cerr << "[" << m_profile.instance_name << "] You must not call giveTaskdescription while contact task!! fail:  [" << name << "]" << std::endl;
+        return false;
+    }
+    switch(task_description.type){
+    case(MOVE_POS):
+        td.type = MOVE_POS;
+        break;
+    case(MOVE_ROT):
+        td.type = MOVE_ROT;
+        break;
+    case(MOVE_POSROT):
+        td.type = MOVE_POSROT;
+        break;
+    case(FIX):
+        td.type = FIX;
+        break;
+    case(MOTION_ONLY):
+        td.type = MOTION_ONLY;
+        break;
+    }
     td.dual = task_description.dual;
     // set task descriptions
     td.velocity_check_dir.normalize();
@@ -2937,14 +2964,20 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     td.ori_target_thresh = task_description.ori_target_thresh;
     td.ori_error_limit = task_description.ori_error_limit;
     td.emergency_recover_time = task_description.emergency_recover_time;
+    if(td.add_static_force){
+        static_force_is_added = true;
+    }
     td.add_static_force = task_description.add_static_force;
     td.static_rfu_gain = task_description.static_rfu_gain;
     // if add_static_force, start force transition
-    if(td.add_static_force){
-        ts.F_now = hrp::dvector6::Zero();
-    }
-    // initialize task state
     reset_taskstate_bool(ts);
+    if(static_force_is_added && !task_description.add_static_force){ //static_forceを消す遷移に入る
+        ts.remove_static_force_count = max_rsfc; //1.5秒かけてremove //ReferenceForceUpdaterを参照
+        ts.F_em_init.head(3) = ts.F_now.head(3);
+    }else if(!static_force_is_added){ //もともとstatic_forceがゼロ
+        ts.F_now = hrp::dvector6::Zero();
+    } //その他::そのまま継続
+    // initialize task state
     // set task goals
     switch(task_description.type){
     case(MOVE_POS):{

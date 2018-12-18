@@ -237,6 +237,7 @@ private:
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         hrp::dvector emergency_q; //joint angles at the moment of transition to emrgency mode
         bool task_succeed_flag; //set true after succeed threshold is exceeded: LTParam.task_succeeded will be set true after transition to emergency is over
+        int remove_static_force_count;
     };
     std::map<std::string, TaskDescription> limb_task_target;
     std::map<std::string, TaskState> limb_task_state;
@@ -409,6 +410,7 @@ private:
         _ts.task_succeed_flag = false;
         _ts.em_transition_count = 0;
         _ts.f2c_transition_count = 0;
+        //remove_static_force_countはリセットしない(IDLE_NORMAL->IDLE_COMPLIANTなどでゼロにされると困る)
     }
 
     // temporary setting these global for debugging
@@ -439,6 +441,7 @@ private:
 
     std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_d, debug_filtereef_s;
     std::map<std::string, std::ofstream*> debug_act_torque;
+    int max_rsfc; //max_remove_static_force_count
 };
 
 extern "C"

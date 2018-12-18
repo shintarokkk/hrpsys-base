@@ -1975,7 +1975,8 @@ void LimbTorqueController::ReferenceForceUpdater()
                         break;
                     } //end switch task type
                 }
-            } else if(param.amode == MANIP_FREE && td.add_static_force){  //end if MANIP_CONTACT
+            } //end if MANIP_CONTACT
+            else if(param.amode == MANIP_FREE && td.add_static_force){
                 ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
             }
         } //end if param is active
@@ -2058,6 +2059,19 @@ void LimbTorqueController::ModeSelector()
                         std::cout << "      [ltc] MODE: MANIP_FREE" << std::endl;
                     }
                     if(ts.vel_over_limit || ts.pos_over_limit || ts.ori_over_limit){
+                        for(int i=0; i<100; i++){
+                            std::cout << ee_name << ": ";
+                            std::cout << "Transition from MANIP_FREE to EMERGEBCY because of ";
+                            if(ts.vel_over_limit){
+                                std::cout << "VELOCITY limit !!!!" << std::endl;
+                            }
+                            if(ts.vel_over_limit){
+                                std::cout << "POSITION limit !!!!" << std::endl;
+                            }
+                            if(ts.vel_over_limit){
+                                std::cout << "ORIENTATION limit !!!!" << std::endl;
+                            }
+                        }
                         if(td.dual){
                             change_to_emergency = true;
                             is_emergency = true;
@@ -2108,7 +2122,6 @@ void LimbTorqueController::ModeSelector()
                                 ts.F_em_init.tail(3) = hrp::Vector3::Zero();
                             }
                         }
-                        //ts.vel_over_thresh = false;
                     }else if(ts.pos_reach_target && td.type == MOTION_ONLY && (!ts.task_succeed_flag)){
                         for(int i=0; i<100; i++){
                             std::cout << ee_name << ": ";
@@ -2134,22 +2147,22 @@ void LimbTorqueController::ModeSelector()
                     if(ts.torque_over_limit || ts.pos_over_limit || ts.ori_over_limit || ts.vel_over_limit){
                         if(ts.torque_over_limit){
                             for(int i=0; i<100; i++){
-                                std::cout << "GOTO EMERGENCY because of torque limit!!!" << std::endl;
+                                std::cout << "CONTACT to EMERGENCY because of torque limit!!!" << std::endl;
                             }
                         }
                         if(ts.pos_over_limit){
                             for(int i=0; i<100; i++){
-                                std::cout << "GOTO EMERGENCY because of position limit!!!" << std::endl;
+                                std::cout << "CONTACT to EMERGENCY because of position limit!!!" << std::endl;
                             }
                         }
                         if(ts.ori_over_limit){
                             for(int i=0; i<100; i++){
-                                std::cout << "GOTO EMERGENCY because of orientation limit!!!" << std::endl;
+                                std::cout << "CONTACT to EMERGENCY because of orientation limit!!!" << std::endl;
                             }
                         }
                         if(ts.vel_over_limit){
                             for(int i=0; i<100; i++){
-                                std::cout << "GOTO EMERGENCY because of velocity limit!!!" << std::endl;
+                                std::cout << "CONTACT to EMERGENCY because of velocity limit!!!" << std::endl;
                             }
                         }
                         if(td.dual){

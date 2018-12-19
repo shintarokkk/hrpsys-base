@@ -2217,6 +2217,9 @@ void LimbTorqueController::ModeSelector()
                         }
                         //ts.pos_reach_target = false; //reach_targetはeusが見る
                     }
+                    if( ts.task_succeed_flag && ts.em_transition_count <= 0 ){
+                        param.task_succeed = true;
+                    }
                     break;
                 case(EMERGENCY):
                     if(loop%300==0){
@@ -2224,9 +2227,6 @@ void LimbTorqueController::ModeSelector()
                     }
                     //TODO: make recovery from emregency mode...velocity check?
                     if(ts.em_transition_count <= 0){
-                        if (ts.task_succeed_flag){
-                            param.task_succeed = true; //releaseが呼ばれるまでtrue保持 //transition_countは両手とも同時にデクリメントされるのでここだけでよい
-                        }
                         //eusからの指令待機
                         if (release_emergency_called[ee_name]){
                             reset_emergency_flag = true;

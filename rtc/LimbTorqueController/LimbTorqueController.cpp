@@ -3264,14 +3264,14 @@ void LimbTorqueController::estimateEEVelForce()
                 prior_state_est = ee_state_coeff[ee_name] * ee_state_est[ee_name][i];
                 prior_error_covar = ee_state_coeff[ee_name] * ee_error_covar[ee_name][i] * ee_state_coeff[ee_name].transpose() + ee_system_noise[ee_name];
                 // filtering step
-                observation << act_ee_vel[ee_name](i), abs_forces[param.sensor_name](i);
+                observation << (act_ee_vel[ee_name](i) - ref_ee_vel[ee_name](i)), abs_forces[param.sensor_name](i);
                 kalman_gain = prior_error_covar * ee_obs_coeff[ee_name].transpose() * ( ee_obs_coeff[ee_name] * prior_error_covar * ee_obs_coeff[ee_name].transpose() + ee_obs_noise[ee_name] ).inverse();
                 ee_state_est[ee_name][i] = prior_state_est + kalman_gain * (observation - ee_obs_coeff[ee_name] * prior_state_est);
                 ee_error_covar[ee_name][i] = (Iden33 - kalman_gain * ee_obs_coeff[ee_name]) * prior_error_covar;
             }
             // reorganize variants into screw and wrench
             for(int i=0; i<3; i++){
-                filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0);
+                filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0) + ref_ee_vel[ee_name](i);
                 filtered_f_d[ee_name](i) = ee_state_est[ee_name][i](1);
                 filtered_f_s[ee_name](i) = ee_state_est[ee_name][i](2);
             }

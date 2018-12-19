@@ -3012,6 +3012,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
         break;
     }
     m_lt_param[name].amode = MANIP_FREE; //automatically set to manip_normal (is this ok?)
+    m_lt_param[name].task_succeed = false; //reset
     std::cout << "[" << m_profile.instance_name << "] successfully set task description for " << name << std::endl;
     return true;
 }

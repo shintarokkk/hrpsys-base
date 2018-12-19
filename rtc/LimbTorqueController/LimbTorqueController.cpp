@@ -1858,8 +1858,8 @@ void LimbTorqueController::ReferenceForceUpdater()
             // transition to emergency
             if(param.amode == EMERGENCY){
                 if(ts.em_transition_count > 0){ //emergency transition
-                    ts.F_now.head(3) = ts.F_em_init.head(3) * ts.em_transition_count / ts.max_em_t_count; //force
-                    ts.F_now.tail(3) = ts.F_em_init.tail(3) * ts.em_transition_count / ts.max_em_t_count; //moment
+                    ts.F_now.head(3) = ts.F_em_init.head(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //force
+                    ts.F_now.tail(3) = ts.F_em_init.tail(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //moment
                     // std::cout << "[emememeememem]" << std::endl;
                     // std::cout << "em_transition_count = " << ts.em_transition_count << std::endl;
                     // std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
@@ -1872,8 +1872,8 @@ void LimbTorqueController::ReferenceForceUpdater()
             if(param.amode == MANIP_CONTACT){
                 if(ts.task_succeed_flag){ //if in MANIP_CONTACT and already succeeded in the task: same as emergency
                     if(ts.em_transition_count > 0){ //emergency transition
-                        ts.F_now.head(3) = ts.F_em_init.head(3) * ts.em_transition_count / ts.max_em_t_count; //force
-                        ts.F_now.tail(3) = ts.F_em_init.tail(3) * ts.em_transition_count / ts.max_em_t_count; //moment
+                        ts.F_now.head(3) = ts.F_em_init.head(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //force
+                        ts.F_now.tail(3) = ts.F_em_init.tail(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //moment
                         // std::cout << "[emememeememem]" << std::endl;
                         // std::cout << "em_transition_count = " << ts.em_transition_count << std::endl;
                         // std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
@@ -1887,9 +1887,9 @@ void LimbTorqueController::ReferenceForceUpdater()
                 else if(ts.f2c_transition_count > 0){
                     if(td.type != FIX){
                         if(td.add_static_force){
-                            ts.F_now.head(3) = ts.F_em_init.head(3) + (ts.max_f2c_t_count - ts.f2c_transition_count) * (td.F_init.head(3) - ts.F_em_init.head(3)) / ts.max_f2c_t_count; //linearly approaching to F_init
+                            ts.F_now.head(3) = ts.F_em_init.head(3) + static_cast<double>((ts.max_f2c_t_count - ts.f2c_transition_count)) * (td.F_init.head(3) - ts.F_em_init.head(3)) / static_cast<double>(ts.max_f2c_t_count); //linearly approaching to F_init
                         }else{
-                            ts.F_now.head(3) = (ts.max_f2c_t_count - ts.f2c_transition_count) * td.F_init.head(3) / ts.max_f2c_t_count; //linearly approaching to F_init
+                            ts.F_now.head(3) = static_cast<double>((ts.max_f2c_t_count - ts.f2c_transition_count)) * td.F_init.head(3) / static_cast<double>(ts.max_f2c_t_count); //linearly approaching to F_init
                         }
                         if(td.type == MOVE_POSROT){
                             double targ_dir_pos_ratio = ts.world_pos_targ_dir.dot(act_eepos[ee_name] - ts.initial_pos) / td.rel_pos_target.norm(); //progress of positional task

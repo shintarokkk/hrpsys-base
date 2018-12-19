@@ -2059,10 +2059,10 @@ void LimbTorqueController::ModeSelector()
                             if(ts.vel_over_limit){
                                 std::cout << "VELOCITY limit !!!!" << std::endl;
                             }
-                            if(ts.vel_over_limit){
+                            if(ts.pos_over_limit){
                                 std::cout << "POSITION limit !!!!" << std::endl;
                             }
-                            if(ts.vel_over_limit){
+                            if(ts.ori_over_limit){
                                 std::cout << "ORIENTATION limit !!!!" << std::endl;
                             }
                             if(ts.torque_over_limit){

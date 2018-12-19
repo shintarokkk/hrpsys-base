@@ -1896,10 +1896,12 @@ void LimbTorqueController::ReferenceForceUpdater()
                             if(targ_dir_pos_ratio <= 0){
                                 targ_dir_pos_ratio = 0; //マイナスは入れない
                             }
-                            hrp::dquaternion virtual_ori_target, virtual_ori_diff;
-                            safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
-                            safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
-                            ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec(); // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
+                            // 試したら発散していった+位置指令も止めずに送る仕様にしたので回転方向ref_forceはコメントアウト 抵抗が大きいようなら復活
+                            // hrp::dquaternion virtual_ori_target, virtual_ori_diff;
+                            // safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
+                            // safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
+                            // ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec(); // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
+
                             // std::cout << std::endl;
                             // std::cout << ee_name << " Transition to contact: " << std::endl;
                             // std::cout << "targ_dir_pos_ratio = " << targ_dir_pos_ratio << std::endl;
@@ -1937,10 +1939,13 @@ void LimbTorqueController::ReferenceForceUpdater()
                         if(targ_dir_pos_ratio <= 0){
                             targ_dir_pos_ratio = 0; //マイナスは入れない
                         }
-                        hrp::dquaternion virtual_ori_target, virtual_ori_diff;
-                        safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
-                        safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
-                        ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec(); // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
+                        // 試したら発散していった+位置指令も止めずに送る仕様にしたので回転方向ref_forceはコメントアウト
+                        // hrp::dquaternion virtual_ori_target, virtual_ori_diff;
+                        // safe_slerp(ts.initial_ori, ts.world_ori_target, targ_dir_pos_ratio, virtual_ori_target);
+                        // safe_quaternion_comparison(virtual_ori_target, act_eequat[ee_name], virtual_ori_diff);
+                        // ts.F_now.tail(3) = param.ee_pgain_r * ts.F_eeR.transpose()  * virtual_ori_diff.vec();
+
+                        // this is moment expressed in EE local coordinate (will be in world coordinate expression when multiplied by eeR from left)
                         // std::cout << std::endl;
                         // std::cout << ee_name << " Stable update: " << std::endl;
                         // std::cout << "targ_dir_pos_ratio = " << targ_dir_pos_ratio << std::endl;

@@ -200,7 +200,7 @@ module OpenHRP
      * @param logname: what kind of log to take: "collision" or "operational"
      * @return true if got successfully, false otherwise
      */
-    boolean startLog(in string name, in string logname);
+      boolean startLog(in string name, in string logname, in string dirname);
 
     /**
      * @brief stop spitting log

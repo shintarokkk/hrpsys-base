@@ -101,7 +101,7 @@ public:
     bool getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_);
     bool getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
     bool getCollisionStatus(const std::string& i_name_, LimbTorqueControllerService::collisionStatus_out i_param_);
-    bool startLog(const std::string& i_name_, const std::string& i_logname_);
+    bool startLog(const std::string& i_name_, const std::string& i_logname_, const std::string& i_dirname_);
     bool stopLog();
     bool startRefdqEstimation(const std::string& i_name_);
     bool stopRefdqEstimation(const std::string& i_name_);

@@ -2561,7 +2561,7 @@ bool LimbTorqueController::checkEmergencyFlag(const std::string& i_name_, bool& 
 
 //i_name_: base file path of log
 //i_logname_: what log to take; "collision" or "operational"
-bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_)
+bool LimbTorqueController::startLog(const std::string& i_name_, const std::string& i_logname_, const std::string& i_dirname_)
 {
     Guard guard(m_mutex);
     std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
@@ -2570,7 +2570,7 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
         if (param.is_active) {
             std::string ee_name = it->first;
             struct stat st;
-            std::string basepath = i_name_ + std::string("/LimbTorqueControllerDebug/");
+            std::string basepath = i_name_ + std::string("/LimbTorqueControllerDebug_") + i_dirname_ + std::string("/");
             if(stat(basepath.c_str(), &st) != 0){
                 mkdir(basepath.c_str(), 0775);
             }

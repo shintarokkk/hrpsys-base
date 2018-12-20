@@ -180,32 +180,22 @@ private:
     };
 
     // MOVE: シャベルを押し込んだり物を手だけ押したり
-    // POS, ROT, POSROT: 目標とるすものが位置か、回転か、両方か
     // FIX: 手でものを持った体相対の位置は固定しながら歩いたり、人間の作業のためにものを支えたり
     // MOTION_ONLY: 手先位置を動かすだけが目標：終了後もMOTION_ONLYでMANIP_FREEモードを継続する
-    enum task_target_type {MOVE_POS, MOVE_ROT, MOVE_POSROT, FIX, MOTION_ONLY};
+    enum task_target_type {MOVE_POS, FIX, MOTION_ONLY};
     // wordings: limit->desired to be avoided | threshold->desired to reach
     struct TaskDescription{
         task_target_type type;
         bool dual;
         hrp::Vector3 velocity_check_dir; //velocity error checking direction to transition to MANIP_CONTACT TODO: angular velocity もチェック?
-        double target_velocity; //target translational velocity during contact (projected onto target dir)
         hrp::dvector F_init; //initial reference force
-        double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
-        double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
         hrp::Vector3 rel_pos_target; //position target relative to initial state //in ee local at initial state
-        hrp::dquaternion rel_ori_target; //orientation target relative to initial state //in ee local at initial state
-        // targetのpos_reach_thresh mm、ori_error_thresh degに手先が近づいたら目標達成とする
-        // 手先現在地とtargetを結ぶ直線に垂直な平面上に射影した手先位置がpos_error_threshだけ遠ざかったらemergency
-        // 手先現在地とtarget間の回転をrpyで表した時、目標のrpyベクトルに垂直な平面上に射影した手先角度がori_error_threshだけ遠ざかったらemergency
+        // 手先現在地とtargetを結ぶ直線に垂直な平面上に射影した手先位置がpos_error_limitだけ遠ざかったらemergency
         double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT
         double vel_check_limit; //velocity error threshold from MANIP_FREE to EMERGENCY
         double cont_vel_error_limit; //velocity threshold from MANIP_CONTACT to EMERGENCY
-        double cont_w_error_limit; //angular velocity threshold from MANIP_CONTACT to EMERGENCY
         double pos_target_thresh; //position distance threshold from MANIP_CONTACT to IDLE_NORMAL
         double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
-        double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL //=cos(x/2) x is threshold in radian
-        double ori_error_limit; //orientation error limit from MANIP_CONTACT to EMERGENCY //=cos(x/2) where x is limit in radian
         double emergency_recover_time; // set this to minus value for no emergency transition
         bool add_static_force; // whether to add static force during MANIP_FREE or not to //TODO: もしかしたらtask_target_typeのMOTION_ONLY=trueと同義かも
         double static_rfu_gain;
@@ -214,25 +204,21 @@ private:
     // エラー等の状態
     struct TaskState{
         hrp::Vector3 world_pos_target; //ee position target in MANIP_CONTACT
-        hrp::dquaternion world_ori_target; //ee orientation target in MANIP_CONTACT
         hrp::Vector3 world_pos_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT
         hrp::Vector3 world_ori_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
         hrp::dvector F_now; //current reference force
         bool pos_over_limit; //whether position error exceeded limit or not
         bool pos_reach_target; //whether position reached near target or not
         bool ori_over_limit; //whether orientation error exceeded limit or not
-        bool ori_reach_target; //whether orientation reached near target or not
         bool vel_over_thresh; // wheter ee velocity exceeds threshold or not (from MANIP_FREE to MANIP_CONTACT) (from IDLE_COMPLIANT to IDLE_NORMAL)
         bool vel_over_limit; // whether ee velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
-        bool w_over_limit; // whether ee angular velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
         bool torque_over_limit; // whether joint torque exceeds limit or not (in MANIP_CONTACT)
-        hrp::Matrix33 F_eeR; //end-effector rotation for reference force in EmergencyEECompensation
+        hrp::Matrix33 F_eeR; //for F_init
         int f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0) //also used from add_static_force=false->add_static_force=true
         int max_f2c_t_count; //maximum value of f2c_transition_count
         int em_transition_count; //transition to EMERGENCY: releaving reference force  //also used from add_static_force=false->add_static_force=true
         int max_em_t_count; //maximum value of em_transition_count
         hrp::dvector F_em_init; //F_now at the moment of emergency transition //also used at transition from add_static_force=false->add_static_force=true
-        double init_point_w; //ee velocity to target direction at the time F_now reached F_init //TODO: これ消す(使わないので)
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         hrp::dvector emergency_q; //joint angles at the moment of transition to emrgency mode
@@ -284,10 +270,6 @@ private:
     std::map<std::string, hrp::dvector> ee_compensation_torque;
     // for null space torque
     std::map<std::string, hrp::dvector> null_space_torque;
-    // for emergency ee compensation
-    std::map<std::string, hrp::Vector3> emergency_ref_eepos;
-    std::map<std::string, hrp::dquaternion> emergency_ref_eequat;
-    std::map<std::string, hrp::Matrix33> emergency_ref_eeR;
     // basic models, necessities
     double m_dt;
     hrp::BodyPtr m_robot;
@@ -372,40 +354,13 @@ private:
         }
     }
 
-    // SLERP with sign check (cannot be applied if initial and final are different by more than 180 degrees)
-    inline void safe_slerp(const hrp::dquaternion& _q_initial, const hrp::dquaternion& _q_final, const double& ratio, hrp::dquaternion& _q_inbetween)
-    {
-        // check and correct jump of quaternion (to prevent windup in orientation feedback)
-        if ( (_q_initial.conjugate()*_q_final).w() < 0 ){
-            hrp::dquaternion negated_q_initial(-_q_initial.w(), -_q_initial.x(), -_q_initial.y(), -_q_initial.z());
-            _q_inbetween = negated_q_initial.slerp(ratio, _q_final);
-        }else{
-            _q_inbetween = _q_initial.slerp(ratio, _q_final);
-        }
-    }
-
-    // decomposition of quaternion to rotations around the axis of direction_q(twist) and its orthogonal vector(swing)
-    // reference from https://stackoverflow.com/questions/3684269/component-of-a-quaternion-rotation-around-an-axis
-    // TODO: 符号チェック要る?(ref,actの順番を間違えないようにし続ければいらないかも)
-    // 180度近い回転をすると特異点になる(そのような目標回転を与えなければOK?)
-    // need singularity check? (rotation near 180 degrees)
-    inline void swing_twist_decomposition(const hrp::dquaternion& _original_q, const hrp::dquaternion& _direction_q, hrp::dquaternion& _swing, hrp::dquaternion& _twist)
-    {
-        hrp::Vector3 twist_axis = _direction_q.vec().normalized();
-        _twist.w() = _original_q.w();
-        _twist.vec() = twist_axis.dot(_original_q.vec()) * twist_axis;
-        _twist.normalize();
-        _swing = _original_q * _twist.conjugate();
-    }
     inline void reset_taskstate_bool(TaskState& _ts)
     {
         _ts.pos_over_limit = false;
         _ts.pos_reach_target = false;
         _ts.ori_over_limit = false;
-        _ts.ori_reach_target = false;
         _ts.vel_over_thresh = false;
         _ts.vel_over_limit = false;
-        _ts.w_over_limit = false;
         _ts.torque_over_limit = false;
         _ts.task_succeed_flag = false;
         _ts.em_transition_count = 0;
@@ -419,9 +374,6 @@ private:
     std::map<std::string, std::ofstream*> debug_cdve, debug_odve, debug_dtt, debug_pen;
     std::map<std::string, hrp::dvector> world_ref_wrench; //actualはabs_forces
     std::map<std::string, std::ofstream*> debug_wrw; //actualはdebug_acteewrench
-    //MOVE_POSROT
-    std::map<std::string, double> pdist_to_target, ppos_error_norm, target_dir_quatdiffw, unwanted_dir_quatdiffw;
-    std::map<std::string, std::ofstream*> debug_pdtt, debug_ppen, debug_tdqw, debug_udqw;
 
     // for new ee estimation: only estimate translational part
     // initially set values //mapじゃなくてもよいかも(両手に同一の値設定しているので)

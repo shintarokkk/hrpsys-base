@@ -1820,6 +1820,7 @@ void LimbTorqueController::ReferenceForceUpdater()
             } //end if MANIP_CONTACT
             else if(param.amode == MANIP_FREE && td.add_static_force){
                 ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- filtered_f_s[ee_name] - ts.F_now.head(3));  //caution: this is in world frame!
+                //ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- abs_forces[param.sensor_name] - ts.F_now.head(3));  //cution: just for evaluation of filter
             }else if(ts.remove_static_force_count > 0){
                 double redu_rate = (static_cast<double>(ts.remove_static_force_count) / static_cast<double>(max_rsfc));
                 ts.F_now.head(3) =  redu_rate * ts.F_em_init.head(3);

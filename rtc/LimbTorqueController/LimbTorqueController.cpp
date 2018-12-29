@@ -1550,13 +1550,15 @@ void LimbTorqueController::VelocityErrorChecker()
             case(MANIP_FREE):{
                 if(td.type == FIX || td.type == MOTION_ONLY){
                     // ignoring check direction... this implemantation should be changed for other tasks than just collision detection only
-                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    // hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    hrp::Vector3 ref_act_eevel_diff = ref_ee_vel[ee_name] - filtered_ee_vel[ee_name]; // calculate in world because no direction is specified
                     other_dir_vel_err[ee_name] = ref_act_eevel_diff.norm();
                     if (other_dir_vel_err[ee_name] > td.vel_check_limit){
                         ts.vel_over_limit = true;
                     }
                 }else{
-                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    // hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - act_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates
+                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * ref_ee_vel[ee_name] - ref_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
                     // double check_dir_vel_err = td.velocity_check_dir.dot(ref_act_eevel_diff);
                     // double other_dir_vel_err = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
                     // temporary: setting global for debugging

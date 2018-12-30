@@ -397,7 +397,8 @@ private:
 
     // for raw filter
     std::map<std::string, hrp::Vector3> raw_act_ee_vel, raw_ref_ee_vel, prev_act_eepos, prev_ref_eepos;
-    std::map<std::string, std::ofstream*> debug_raw_acteevel, debug_raw_refeevel;
+    std::map<std::string, std::ofstream*> debug_raw_acteevel, debug_raw_refeevel, debug_raw_odve, debug_raw_cdve;
+    std::map<std::string, double> raw_odve, raw_cdve;
 };
 
 extern "C"

@@ -361,9 +361,12 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         ee_ori_error[ee_name] = hrp::Vector3::Zero();
         act_eepos[ee_name] = hrp::Vector3::Zero();
         ref_eepos[ee_name] = hrp::Vector3::Zero();
-        //prev_ref_eepos[ee_name] = hrp::Vector3::Zero();
+        prev_act_eepos[ee_name] = hrp::Vector3::Zero();
+        prev_ref_eepos[ee_name] = hrp::Vector3::Zero();
         act_ee_vel[ee_name] = hrp::Vector3::Zero();
         ref_ee_vel[ee_name] = hrp::Vector3::Zero();
+        raw_act_ee_vel[ee_name] = hrp::Vector3::Zero();
+        raw_ref_ee_vel[ee_name] = hrp::Vector3::Zero();
         act_ee_w[ee_name] = hrp::Vector3::Zero();
         ref_ee_w[ee_name] = hrp::Vector3::Zero();
         act_eeR[ee_name] = hrp::Matrix33::Identity();
@@ -852,7 +855,8 @@ void LimbTorqueController::getEEStates()
                 ee_w_filter[ee_name].fill(act_eeR[ee_name]);
                 ref_ee_vel_filter[ee_name].fill(ref_eepos[ee_name]);
                 ref_ee_w_filter[ee_name].fill(ref_eeR[ee_name]);
-                //prev_ref_eepos[ee_name] = ref_eepos[ee_name];
+                prev_act_eepos[ee_name] = act_eepos[ee_name];
+                prev_ref_eepos[ee_name] = ref_eepos[ee_name];
                 //prev_ref_eeR[ee_name] = ref_eeR[ee_name];
                 geteestates_initialized[ee_name] = true;
             }
@@ -863,8 +867,9 @@ void LimbTorqueController::getEEStates()
             ref_ee_w_filter[ee_name].push(ref_eeR[ee_name]);
             // calculate ee velocity
             act_ee_vel[ee_name] = ee_vel_filter[ee_name].get_velocity();
-            //ref_ee_vel[ee_name] = (ref_eepos[ee_name] - prev_ref_eepos[ee_name]) / RTC_PERIOD;
             ref_ee_vel[ee_name] = ref_ee_vel_filter[ee_name].get_velocity();
+            raw_act_ee_vel[ee_name] = (act_eepos[ee_name] - prev_act_eepos[ee_name]) / RTC_PERIOD; //for raw filter
+            raw_ref_ee_vel[ee_name] = (ref_eepos[ee_name] - prev_ref_eepos[ee_name]) / RTC_PERIOD; //for raw filter
             ee_vel_error[ee_name] = ref_ee_vel[ee_name] - act_ee_vel[ee_name];
             // callulate ee angular velocity
             hrp::Matrix33 act_ee_w_omega_mat = ee_w_filter[ee_name].get_velocity() * act_eeR[ee_name].transpose();
@@ -880,8 +885,9 @@ void LimbTorqueController::getEEStates()
                 ((ref_ee_w_omega_mat(1,0) - ref_ee_w_omega_mat(0,1)) / 2);
             ee_w_error[ee_name] = ref_ee_w[ee_name] - act_ee_w[ee_name];
 
-            // save current position, rotation as previous
-            //prev_ref_eepos[ee_name] = ref_eepos[ee_name];
+            // save current position, rotation as previous // for raw filter
+            prev_act_eepos[ee_name] = act_eepos[ee_name];
+            prev_ref_eepos[ee_name] = ref_eepos[ee_name];
             //prev_ref_eeR[ee_name] = ref_eeR[ee_name];
         } // end if param is active
         it++;
@@ -2176,6 +2182,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_filtereef_d[ee_name]) << micro_time;
                     *(debug_filtereef_s[ee_name]) << micro_time;
                     *(debug_act_torque[ee_name]) << micro_time;
+                    *(debug_raw_acteevel[ee_name]) << micro_time;
+                    *(debug_raw_refeevel[ee_name]) << micro_time;
                 }
                 if(log_type == 1){
                     //calc external force
@@ -2212,6 +2220,8 @@ void LimbTorqueController::DebugOutput()
                         *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
                         *(debug_acteew[ee_name]) << " " << act_ee_w[ee_name](i);
                         *(debug_refeew[ee_name]) << " " << ref_ee_w[ee_name](i);
+                        *(debug_raw_acteevel[ee_name]) << " " << raw_act_ee_vel[ee_name](i);
+                        *(debug_raw_refeevel[ee_name]) << " " << raw_ref_ee_vel[ee_name](i);
                     }
                     for (int i=0; i<6; i++){
                         *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
@@ -2274,6 +2284,8 @@ void LimbTorqueController::DebugOutput()
                     *(debug_filtereef_d[ee_name]) << std::endl;
                     *(debug_filtereef_s[ee_name]) << std::endl;
                     *(debug_act_torque[ee_name]) << std::endl;
+                    *(debug_raw_acteevel[ee_name]) << std::endl;
+                    *(debug_raw_refeevel[ee_name]) << std::endl;
                 }
             }
             it++;
@@ -2621,6 +2633,8 @@ bool LimbTorqueController::startLog(const std::string& i_name_, const std::strin
                 debug_filtereef_d[ee_name] = new std::ofstream((logpath + std::string("filter_eef_d.dat")).c_str());
                 debug_filtereef_s[ee_name] = new std::ofstream((logpath + std::string("filter_eef_s.dat")).c_str());
                 debug_act_torque[ee_name] = new std::ofstream((logpath + std::string("act_torque.dat")).c_str());
+                debug_raw_acteevel[ee_name] = new std::ofstream((logpath + std::string("raw_acteevel.dat")).c_str());
+                debug_raw_refeevel[ee_name] = new std::ofstream((logpath + std::string("raw_refeevel.dat")).c_str());
                 log_type = 2;
                 spit_log = true;
                 std::cout << "[ltc] startLog succeed: open log stream for operational space control!!" << std::endl;
@@ -2684,6 +2698,8 @@ bool LimbTorqueController::stopLog()
                 delete debug_filtereef_d[ee_name];
                 delete debug_filtereef_s[ee_name];
                 delete debug_act_torque[ee_name];
+                delete debug_raw_acteevel[ee_name];
+                delete debug_raw_refeevel[ee_name];
             }
         }
         it++;
@@ -3003,14 +3019,16 @@ void LimbTorqueController::estimateEEVelForce()
                 prior_state_est = ee_state_coeff[ee_name] * ee_state_est[ee_name][i];
                 prior_error_covar = ee_state_coeff[ee_name] * ee_error_covar[ee_name][i] * ee_state_coeff[ee_name].transpose() + ee_system_noise[ee_name];
                 // filtering step
-                observation << (act_ee_vel[ee_name](i) - ref_ee_vel[ee_name](i)), abs_forces[param.sensor_name](i);
+                //observation << (act_ee_vel[ee_name](i) - ref_ee_vel[ee_name](i)), abs_forces[param.sensor_name](i);
+                observation << (raw_act_ee_vel[ee_name](i) - raw_ref_ee_vel[ee_name](i)), abs_forces[param.sensor_name](i); // raw filter
                 kalman_gain = prior_error_covar * ee_obs_coeff[ee_name].transpose() * ( ee_obs_coeff[ee_name] * prior_error_covar * ee_obs_coeff[ee_name].transpose() + ee_obs_noise[ee_name] ).inverse();
                 ee_state_est[ee_name][i] = prior_state_est + kalman_gain * (observation - ee_obs_coeff[ee_name] * prior_state_est);
                 ee_error_covar[ee_name][i] = (Iden33 - kalman_gain * ee_obs_coeff[ee_name]) * prior_error_covar;
             }
             // reorganize variants into screw and wrench
             for(int i=0; i<3; i++){
-                filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0) + ref_ee_vel[ee_name](i);
+                //filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0) + ref_ee_vel[ee_name](i);
+                filtered_ee_vel[ee_name](i) = ee_state_est[ee_name][i](0) + raw_ref_ee_vel[ee_name](i); // raw filter
                 filtered_f_d[ee_name](i) = ee_state_est[ee_name][i](1);
                 filtered_f_s[ee_name](i) = ee_state_est[ee_name][i](2);
             }

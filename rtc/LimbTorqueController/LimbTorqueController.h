@@ -255,7 +255,7 @@ private:
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
 
     // end-effector states
-    std::map<std::string, hrp::Vector3> act_eepos, ref_eepos, prev_ref_eepos;
+    std::map<std::string, hrp::Vector3> act_eepos, ref_eepos;
     std::map<std::string, hrp::dquaternion> act_eequat, ref_eequat;
     std::map<std::string, hrp::Matrix33> act_eeR, ref_eeR, prev_ref_eeR;
     std::map<std::string, hrp::Vector3> act_ee_vel, ref_ee_vel, act_ee_w, ref_ee_w;
@@ -394,6 +394,10 @@ private:
     std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_d, debug_filtereef_s;
     std::map<std::string, std::ofstream*> debug_act_torque;
     int max_rsfc; //max_remove_static_force_count
+
+    // for raw filter
+    std::map<std::string, hrp::Vector3> raw_act_ee_vel, raw_ref_ee_vel, prev_act_eepos, prev_ref_eepos;
+    std::map<std::string, std::ofstream*> debug_raw_acteevel, debug_raw_refeevel;
 };
 
 extern "C"

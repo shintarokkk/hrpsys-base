@@ -2148,173 +2148,171 @@ void LimbTorqueController::ModeSelector()
 
 void LimbTorqueController::DebugOutput()
 {
-    if (loop%3 == 0){
-        std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
-        while (it != m_lt_param.end()){
-            LTParam& param = it->second;
-            std::string ee_name = it->first;
-            if (param.is_active) {
-                hrp::JointPathExPtr manip = param.manip;
-                int limbdof = manip->numJoints();
-                struct timeval nowtime;
-                gettimeofday(&nowtime, NULL);
-                long int micro_time = nowtime.tv_sec*1e+6 + nowtime.tv_usec;
-                if(log_type == 1){
-                    *(debug_mom[ee_name]) << micro_time;
-                    *(debug_actau[ee_name]) << micro_time;
-                    *(debug_acbet[ee_name]) << micro_time;
-                    *(debug_acres[ee_name]) << micro_time;
-                    *(debug_res[ee_name]) << micro_time;
-                    *(debug_reftq[ee_name]) << micro_time;
-                    *(debug_f[ee_name]) << micro_time;
-                }
-                else if(log_type == 2){
-                    *(debug_ee_pocw[ee_name]) << micro_time;
-                    *(debug_ee_vwcw[ee_name]) << micro_time;
-                    *(debug_eect[ee_name]) << micro_time;
-                    *(debug_nst[ee_name]) << micro_time;
-                    *(debug_ee_poserror[ee_name]) << micro_time;
-                    *(debug_ee_orierror[ee_name]) << micro_time;
-                    *(debug_ee_velerror[ee_name]) << micro_time;
-                    *(debug_ee_werror[ee_name]) << micro_time;
-                    *(debug_reftq[ee_name]) << micro_time;
-                    *(debug_acteevel[ee_name]) << micro_time;
-                    *(debug_refeevel[ee_name]) << micro_time;
-                    *(debug_acteew[ee_name]) << micro_time;
-                    *(debug_refeew[ee_name]) << micro_time;
-                    *(debug_dqest[ee_name]) << micro_time;
-                    *(debug_dqact[ee_name]) << micro_time;
-                    *(debug_qest[ee_name]) << micro_time;
-                    *(debug_qact[ee_name]) << micro_time;
-                    *(debug_qref[ee_name]) << micro_time;
-                    *(debug_acteescrew[ee_name]) << micro_time;
-                    *(debug_acteewrench[ee_name]) << micro_time;
-                    //MOVE_POS: MANIP_FREE
-                    *(debug_cdve[ee_name]) << micro_time; //check_dir_vel_err
-                    *(debug_odve[ee_name]) << micro_time; //other_dir_vel_err
-                    //MOVE_POS: MANIP_CONCTACT
-                    *(debug_dtt[ee_name]) << micro_time; //dist_to_target
-                    *(debug_pen[ee_name]) << micro_time; //pos_error_norm
-                    *(debug_wrw[ee_name]) << micro_time;
-                    // new eeest
-                    *(debug_filtereevel[ee_name]) << micro_time;
-                    *(debug_filtereef_d[ee_name]) << micro_time;
-                    *(debug_filtereef_s[ee_name]) << micro_time;
-                    *(debug_act_torque[ee_name]) << micro_time;
-                    *(debug_raw_acteevel[ee_name]) << micro_time;
-                    *(debug_raw_refeevel[ee_name]) << micro_time;
-                    *(debug_raw_odve[ee_name]) << micro_time;
-                    *(debug_raw_cdve[ee_name]) << micro_time;
-                }
-                if(log_type == 1){
-                    //calc external force
-                    hrp::dvector external_force = hrp::dvector::Zero(6);
-                    hrp::dmatrix inv_j(manip->numJoints(), 6);
-                    hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
-                    external_force = inv_j * gen_mom_res[ee_name];
-                    for (unsigned int i=0; i<limbdof; ++i){
-                        *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
-                        *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
-                        *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
-                        *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
-                        *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
-                        *(debug_reftq[ee_name]) << " " << reference_torque(i);
-                    }
-                    for (unsigned int i=0; i<6; ++i){
-                        *(debug_f[ee_name]) << " " << external_force(i);
-                    }
-                    *(debug_mom[ee_name]) << std::endl;
-                    *(debug_actau[ee_name]) << std::endl;
-                    *(debug_acbet[ee_name]) << std::endl;
-                    *(debug_acres[ee_name]) << std::endl;
-                    *(debug_res[ee_name]) << std::endl;
-                    *(debug_reftq[ee_name]) << std::endl;
-                    *(debug_f[ee_name]) << std::endl;
-                }
-                else if(log_type == 2){
-                    for (int i=0; i<3; i++){
-                        *(debug_ee_poserror[ee_name]) << " " << ee_pos_error[ee_name](i);
-                        *(debug_ee_orierror[ee_name]) << " " << ee_ori_error[ee_name](i);
-                        *(debug_ee_velerror[ee_name]) << " " << ee_vel_error[ee_name](i);
-                        *(debug_ee_werror[ee_name]) << " " << ee_w_error[ee_name](i);
-                        *(debug_acteevel[ee_name]) << " " << act_ee_vel[ee_name](i);
-                        *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
-                        *(debug_acteew[ee_name]) << " " << act_ee_w[ee_name](i);
-                        *(debug_refeew[ee_name]) << " " << ref_ee_w[ee_name](i);
-                        *(debug_raw_acteevel[ee_name]) << " " << raw_act_ee_vel[ee_name](i);
-                        *(debug_raw_refeevel[ee_name]) << " " << raw_ref_ee_vel[ee_name](i);
-                    }
-                    for (int i=0; i<6; i++){
-                        *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
-                        *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
-                        *(debug_wrw[ee_name]) << " " << world_ref_wrench[ee_name](i);
-                    }
-                    for (int i=0; i<3; i++){
-                        *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
-                        *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
-                        *(debug_filtereevel[ee_name]) << " " << filtered_ee_vel[ee_name](i);
-                        *(debug_filtereef_d[ee_name]) << " " << filtered_f_d[ee_name](i);
-                        *(debug_filtereef_s[ee_name]) << " " << filtered_f_s[ee_name](i);
-                    }
-                    for (int i=0; i<3; i++){
-                        *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
-                        *(debug_acteewrench[ee_name]) << " " << abs_moments[param.sensor_name](i);
-                    }
-                    for (int i=0; i<limbdof; i++){
-                        int jid = manip->joint(i)->jointId;
-                        *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
-                        *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
-                        *(debug_reftq[ee_name]) << " " << reference_torque(jid);
-                        *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(jid);
-                        *(debug_dqact[ee_name]) << " " << m_robot->joint(jid)->dq;
-                        *(debug_qest[ee_name]) << " " << log_est_q(jid);
-                        *(debug_qact[ee_name]) << " " << log_act_q(jid);
-                        *(debug_qref[ee_name]) << " " << log_ref_q(jid);
-                        *(debug_act_torque[ee_name]) << " " << actual_torque_vector(jid);
-                    }
-                    *(debug_cdve[ee_name]) << " " << check_dir_vel_err[ee_name];
-                    *(debug_odve[ee_name]) << " " << other_dir_vel_err[ee_name];
-                    *(debug_dtt[ee_name]) << " " << dist_to_target[ee_name];
-                    *(debug_pen[ee_name]) << " " << pos_error_norm[ee_name];
-                    *(debug_raw_odve[ee_name]) << " " << raw_odve[ee_name];
-                    *(debug_raw_cdve[ee_name]) << " " << raw_cdve[ee_name];
-                    *(debug_ee_pocw[ee_name]) << std::endl;
-                    *(debug_ee_vwcw[ee_name]) << std::endl;
-                    *(debug_eect[ee_name]) << std::endl;
-                    *(debug_nst[ee_name]) << std::endl;
-                    *(debug_ee_poserror[ee_name]) << std::endl;
-                    *(debug_ee_orierror[ee_name]) << std::endl;
-                    *(debug_ee_velerror[ee_name]) << std::endl;
-                    *(debug_ee_werror[ee_name]) << std::endl;
-                    *(debug_reftq[ee_name]) << std::endl;
-                    *(debug_acteevel[ee_name]) << std::endl;
-                    *(debug_refeevel[ee_name]) << std::endl;
-                    *(debug_acteew[ee_name]) << std::endl;
-                    *(debug_refeew[ee_name]) << std::endl;
-                    *(debug_dqest[ee_name]) << std::endl;
-                    *(debug_dqact[ee_name]) << std::endl;
-                    *(debug_qest[ee_name]) << std::endl;
-                    *(debug_qact[ee_name]) << std::endl;
-                    *(debug_qref[ee_name]) << std::endl;
-                    *(debug_acteescrew[ee_name]) << std::endl;
-                    *(debug_acteewrench[ee_name]) << std::endl;
-                    *(debug_cdve[ee_name]) << std::endl;
-                    *(debug_odve[ee_name]) << std::endl;
-                    *(debug_dtt[ee_name]) << std::endl;
-                    *(debug_pen[ee_name]) << std::endl;
-                    *(debug_wrw[ee_name]) << std::endl;
-                    *(debug_filtereevel[ee_name]) << std::endl;
-                    *(debug_filtereef_d[ee_name]) << std::endl;
-                    *(debug_filtereef_s[ee_name]) << std::endl;
-                    *(debug_act_torque[ee_name]) << std::endl;
-                    *(debug_raw_acteevel[ee_name]) << std::endl;
-                    *(debug_raw_refeevel[ee_name]) << std::endl;
-                    *(debug_raw_odve[ee_name]) << std::endl;
-                    *(debug_raw_cdve[ee_name]) << std::endl;
-                }
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while (it != m_lt_param.end()){
+        LTParam& param = it->second;
+        std::string ee_name = it->first;
+        if (param.is_active) {
+            hrp::JointPathExPtr manip = param.manip;
+            int limbdof = manip->numJoints();
+            struct timeval nowtime;
+            gettimeofday(&nowtime, NULL);
+            long int micro_time = nowtime.tv_sec*1e+6 + nowtime.tv_usec;
+            if(log_type == 1){
+                *(debug_mom[ee_name]) << micro_time;
+                *(debug_actau[ee_name]) << micro_time;
+                *(debug_acbet[ee_name]) << micro_time;
+                *(debug_acres[ee_name]) << micro_time;
+                *(debug_res[ee_name]) << micro_time;
+                *(debug_reftq[ee_name]) << micro_time;
+                *(debug_f[ee_name]) << micro_time;
             }
-            it++;
+            else if(log_type == 2){
+                *(debug_ee_pocw[ee_name]) << micro_time;
+                *(debug_ee_vwcw[ee_name]) << micro_time;
+                *(debug_eect[ee_name]) << micro_time;
+                *(debug_nst[ee_name]) << micro_time;
+                *(debug_ee_poserror[ee_name]) << micro_time;
+                *(debug_ee_orierror[ee_name]) << micro_time;
+                *(debug_ee_velerror[ee_name]) << micro_time;
+                *(debug_ee_werror[ee_name]) << micro_time;
+                *(debug_reftq[ee_name]) << micro_time;
+                *(debug_acteevel[ee_name]) << micro_time;
+                *(debug_refeevel[ee_name]) << micro_time;
+                *(debug_acteew[ee_name]) << micro_time;
+                *(debug_refeew[ee_name]) << micro_time;
+                *(debug_dqest[ee_name]) << micro_time;
+                *(debug_dqact[ee_name]) << micro_time;
+                *(debug_qest[ee_name]) << micro_time;
+                *(debug_qact[ee_name]) << micro_time;
+                *(debug_qref[ee_name]) << micro_time;
+                *(debug_acteescrew[ee_name]) << micro_time;
+                *(debug_acteewrench[ee_name]) << micro_time;
+                //MOVE_POS: MANIP_FREE
+                *(debug_cdve[ee_name]) << micro_time; //check_dir_vel_err
+                *(debug_odve[ee_name]) << micro_time; //other_dir_vel_err
+                //MOVE_POS: MANIP_CONCTACT
+                *(debug_dtt[ee_name]) << micro_time; //dist_to_target
+                *(debug_pen[ee_name]) << micro_time; //pos_error_norm
+                *(debug_wrw[ee_name]) << micro_time;
+                // new eeest
+                *(debug_filtereevel[ee_name]) << micro_time;
+                *(debug_filtereef_d[ee_name]) << micro_time;
+                *(debug_filtereef_s[ee_name]) << micro_time;
+                *(debug_act_torque[ee_name]) << micro_time;
+                *(debug_raw_acteevel[ee_name]) << micro_time;
+                *(debug_raw_refeevel[ee_name]) << micro_time;
+                *(debug_raw_odve[ee_name]) << micro_time;
+                *(debug_raw_cdve[ee_name]) << micro_time;
+            }
+            if(log_type == 1){
+                //calc external force
+                hrp::dvector external_force = hrp::dvector::Zero(6);
+                hrp::dmatrix inv_j(manip->numJoints(), 6);
+                hrp::calcPseudoInverse(act_ee_jacobian[ee_name].transpose(), inv_j);
+                external_force = inv_j * gen_mom_res[ee_name];
+                for (unsigned int i=0; i<limbdof; ++i){
+                    *(debug_mom[ee_name]) << " " << (gen_mom[ee_name](i) - initial_gen_mom[ee_name](i));
+                    *(debug_actau[ee_name]) << " " << accum_tau[ee_name](i);
+                    *(debug_acbet[ee_name]) << " " << accum_beta[ee_name](i);
+                    *(debug_acres[ee_name]) << " " << accum_res[ee_name](i);
+                    *(debug_res[ee_name]) << " " << gen_mom_res[ee_name](i);
+                    *(debug_reftq[ee_name]) << " " << reference_torque(i);
+                }
+                for (unsigned int i=0; i<6; ++i){
+                    *(debug_f[ee_name]) << " " << external_force(i);
+                }
+                *(debug_mom[ee_name]) << std::endl;
+                *(debug_actau[ee_name]) << std::endl;
+                *(debug_acbet[ee_name]) << std::endl;
+                *(debug_acres[ee_name]) << std::endl;
+                *(debug_res[ee_name]) << std::endl;
+                *(debug_reftq[ee_name]) << std::endl;
+                *(debug_f[ee_name]) << std::endl;
+            }
+            else if(log_type == 2){
+                for (int i=0; i<3; i++){
+                    *(debug_ee_poserror[ee_name]) << " " << ee_pos_error[ee_name](i);
+                    *(debug_ee_orierror[ee_name]) << " " << ee_ori_error[ee_name](i);
+                    *(debug_ee_velerror[ee_name]) << " " << ee_vel_error[ee_name](i);
+                    *(debug_ee_werror[ee_name]) << " " << ee_w_error[ee_name](i);
+                    *(debug_acteevel[ee_name]) << " " << act_ee_vel[ee_name](i);
+                    *(debug_refeevel[ee_name]) << " " << ref_ee_vel[ee_name](i);
+                    *(debug_acteew[ee_name]) << " " << act_ee_w[ee_name](i);
+                    *(debug_refeew[ee_name]) << " " << ref_ee_w[ee_name](i);
+                    *(debug_raw_acteevel[ee_name]) << " " << raw_act_ee_vel[ee_name](i);
+                    *(debug_raw_refeevel[ee_name]) << " " << raw_ref_ee_vel[ee_name](i);
+                }
+                for (int i=0; i<6; i++){
+                    *(debug_ee_pocw[ee_name]) << " " << ee_pos_ori_comp_wrench[ee_name](i);
+                    *(debug_ee_vwcw[ee_name]) << " " << ee_vel_w_comp_wrench[ee_name](i);
+                    *(debug_wrw[ee_name]) << " " << world_ref_wrench[ee_name](i);
+                }
+                for (int i=0; i<3; i++){
+                    *(debug_acteescrew[ee_name]) << " " << act_ee_vel[ee_name](i);
+                    *(debug_acteewrench[ee_name]) << " " << abs_forces[param.sensor_name](i);
+                    *(debug_filtereevel[ee_name]) << " " << filtered_ee_vel[ee_name](i);
+                    *(debug_filtereef_d[ee_name]) << " " << filtered_f_d[ee_name](i);
+                    *(debug_filtereef_s[ee_name]) << " " << filtered_f_s[ee_name](i);
+                }
+                for (int i=0; i<3; i++){
+                    *(debug_acteescrew[ee_name]) << " " << act_ee_w[ee_name](i);
+                    *(debug_acteewrench[ee_name]) << " " << abs_moments[param.sensor_name](i);
+                }
+                for (int i=0; i<limbdof; i++){
+                    int jid = manip->joint(i)->jointId;
+                    *(debug_eect[ee_name]) << " " << ee_compensation_torque[ee_name](i);
+                    *(debug_nst[ee_name]) << " " << null_space_torque[ee_name](i);
+                    *(debug_reftq[ee_name]) << " " << reference_torque(jid);
+                    *(debug_dqest[ee_name]) << " " << estimated_reference_velocity(jid);
+                    *(debug_dqact[ee_name]) << " " << m_robot->joint(jid)->dq;
+                    *(debug_qest[ee_name]) << " " << log_est_q(jid);
+                    *(debug_qact[ee_name]) << " " << log_act_q(jid);
+                    *(debug_qref[ee_name]) << " " << log_ref_q(jid);
+                    *(debug_act_torque[ee_name]) << " " << actual_torque_vector(jid);
+                }
+                *(debug_cdve[ee_name]) << " " << check_dir_vel_err[ee_name];
+                *(debug_odve[ee_name]) << " " << other_dir_vel_err[ee_name];
+                *(debug_dtt[ee_name]) << " " << dist_to_target[ee_name];
+                *(debug_pen[ee_name]) << " " << pos_error_norm[ee_name];
+                *(debug_raw_odve[ee_name]) << " " << raw_odve[ee_name];
+                *(debug_raw_cdve[ee_name]) << " " << raw_cdve[ee_name];
+                *(debug_ee_pocw[ee_name]) << std::endl;
+                *(debug_ee_vwcw[ee_name]) << std::endl;
+                *(debug_eect[ee_name]) << std::endl;
+                *(debug_nst[ee_name]) << std::endl;
+                *(debug_ee_poserror[ee_name]) << std::endl;
+                *(debug_ee_orierror[ee_name]) << std::endl;
+                *(debug_ee_velerror[ee_name]) << std::endl;
+                *(debug_ee_werror[ee_name]) << std::endl;
+                *(debug_reftq[ee_name]) << std::endl;
+                *(debug_acteevel[ee_name]) << std::endl;
+                *(debug_refeevel[ee_name]) << std::endl;
+                *(debug_acteew[ee_name]) << std::endl;
+                *(debug_refeew[ee_name]) << std::endl;
+                *(debug_dqest[ee_name]) << std::endl;
+                *(debug_dqact[ee_name]) << std::endl;
+                *(debug_qest[ee_name]) << std::endl;
+                *(debug_qact[ee_name]) << std::endl;
+                *(debug_qref[ee_name]) << std::endl;
+                *(debug_acteescrew[ee_name]) << std::endl;
+                *(debug_acteewrench[ee_name]) << std::endl;
+                *(debug_cdve[ee_name]) << std::endl;
+                *(debug_odve[ee_name]) << std::endl;
+                *(debug_dtt[ee_name]) << std::endl;
+                *(debug_pen[ee_name]) << std::endl;
+                *(debug_wrw[ee_name]) << std::endl;
+                *(debug_filtereevel[ee_name]) << std::endl;
+                *(debug_filtereef_d[ee_name]) << std::endl;
+                *(debug_filtereef_s[ee_name]) << std::endl;
+                *(debug_act_torque[ee_name]) << std::endl;
+                *(debug_raw_acteevel[ee_name]) << std::endl;
+                *(debug_raw_refeevel[ee_name]) << std::endl;
+                *(debug_raw_odve[ee_name]) << std::endl;
+                *(debug_raw_cdve[ee_name]) << std::endl;
+            }
         }
+        it++;
     }
 }
 

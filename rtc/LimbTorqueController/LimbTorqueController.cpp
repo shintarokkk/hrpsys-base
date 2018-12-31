@@ -1565,15 +1565,15 @@ void LimbTorqueController::VelocityErrorChecker()
                         ts.vel_over_limit = true;
                     }
                 }else{
-                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * raw_ref_ee_vel[ee_name] - ref_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
+                    hrp::Vector3 ref_act_eevel_diff = raw_ref_ee_vel[ee_name] - filtered_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
                     // temporary: setting global for debugging
-                    check_dir_vel_err[ee_name] = td.velocity_check_dir.dot(ref_act_eevel_diff);
-                    other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    check_dir_vel_err[ee_name] = ts.world_vel_check_dir.dot(ref_act_eevel_diff);
+                    other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(ts.world_vel_check_dir) * ts.world_vel_check_dir).norm();
 
                     // just for check
-                    hrp::Vector3 raw_ref_act_eevel_diff = ref_eeR[ee_name].transpose() * raw_ref_ee_vel[ee_name] - ref_eeR[ee_name].transpose() * raw_act_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
-                    raw_cdve[ee_name] = td.velocity_check_dir.dot(raw_ref_act_eevel_diff);
-                    raw_odve[ee_name] = (raw_ref_act_eevel_diff - raw_ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    hrp::Vector3 raw_ref_act_eevel_diff = raw_ref_ee_vel[ee_name] - raw_act_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
+                    raw_cdve[ee_name] = ts.world_vel_check_dir.dot(raw_ref_act_eevel_diff);
+                    raw_odve[ee_name] = (raw_ref_act_eevel_diff - raw_ref_act_eevel_diff.dot(ts.world_vel_check_dir) * ts.world_vel_check_dir).norm();
                     if (check_dir_vel_err[ee_name] > td.vel_check_thresh){
                         ts.vel_over_thresh = true;
                     }else if (other_dir_vel_err[ee_name] > td.vel_check_limit){
@@ -1616,14 +1616,15 @@ void LimbTorqueController::VelocityErrorChecker()
                     hrp::Vector3 raw_ref_act_eevel_diff = raw_ref_ee_vel[ee_name] - raw_act_ee_vel[ee_name]; // calculate in world because no direction is specified
                     raw_odve[ee_name] = raw_ref_act_eevel_diff.norm();
                 }else{
-                    hrp::Vector3 ref_act_eevel_diff = ref_eeR[ee_name].transpose() * raw_ref_ee_vel[ee_name] - ref_eeR[ee_name].transpose() * filtered_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
-                    check_dir_vel_err[ee_name] = td.velocity_check_dir.dot(ref_act_eevel_diff);
-                    other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    hrp::Vector3 ref_act_eevel_diff = raw_ref_ee_vel[ee_name] - filtered_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
+                    // temporary: setting global for debugging
+                    check_dir_vel_err[ee_name] = ts.world_vel_check_dir.dot(ref_act_eevel_diff);
+                    other_dir_vel_err[ee_name] = (ref_act_eevel_diff - ref_act_eevel_diff.dot(ts.world_vel_check_dir) * ts.world_vel_check_dir).norm();
 
                     // just for check
-                    hrp::Vector3 raw_ref_act_eevel_diff = ref_eeR[ee_name].transpose() * raw_ref_ee_vel[ee_name] - ref_eeR[ee_name].transpose() * raw_act_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
-                    raw_cdve[ee_name] = td.velocity_check_dir.dot(raw_ref_act_eevel_diff);
-                    raw_odve[ee_name] = (raw_ref_act_eevel_diff - raw_ref_act_eevel_diff.dot(td.velocity_check_dir) * td.velocity_check_dir).norm();
+                    hrp::Vector3 raw_ref_act_eevel_diff = raw_ref_ee_vel[ee_name] - raw_act_ee_vel[ee_name]; // in ee local coordinates: use ref_eeR because act_eeR is too noisy
+                    raw_cdve[ee_name] = ts.world_vel_check_dir.dot(raw_ref_act_eevel_diff);
+                    raw_odve[ee_name] = (raw_ref_act_eevel_diff - raw_ref_act_eevel_diff.dot(ts.world_vel_check_dir) * ts.world_vel_check_dir).norm();
                 }
                 ts.vel_over_limit = false; //do not check
                 break;
@@ -2802,6 +2803,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
         ts.initial_pos = ref_eepos[name];
         ts.world_pos_target = ref_eepos[name] + ref_eeR[name] * td.rel_pos_target;
         ts.world_pos_targ_dir = (ref_eeR[name] * td.rel_pos_target).normalized();
+        ts.world_vel_check_dir = (ref_eeR[name] * td.velocity_check_dir).normalized();
         ts.F_eeR = ref_eeR[name];
         break;
     }
@@ -2881,6 +2883,7 @@ void LimbTorqueController::copyTaskState(OpenHRP::LimbTorqueControllerService::t
         i_tasks_.world_pos_target[i] = param.world_pos_target(i);
         i_tasks_.world_pos_targ_dir[i] = param.world_pos_targ_dir(i);
         i_tasks_.world_ori_targ_dir[i] = param.world_ori_targ_dir(i);
+        i_tasks_.world_vel_check_dir[i] = param.world_vel_check_dir(i);
         i_tasks_.initial_pos[i] = param.initial_pos(i);
         i_tasks_.initial_ori[i+1] = param.initial_ori.vec()(i);
         for(int j=0; j<3; j++){
@@ -2910,6 +2913,7 @@ bool LimbTorqueController::getTaskState(const std::string &i_name_, OpenHRP::Lim
     i_tasks_->world_pos_target.length(3);
     i_tasks_->world_pos_targ_dir.length(3);
     i_tasks_->world_ori_targ_dir.length(3);
+    i_tasks_->world_vel_check_dir.length(3);
     i_tasks_->initial_pos.length(3);
     i_tasks_->F_eeR.length(9);
     i_tasks_->F_em_init.length(6);

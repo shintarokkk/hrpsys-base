@@ -206,6 +206,7 @@ private:
         hrp::Vector3 world_pos_target; //ee position target in MANIP_CONTACT
         hrp::Vector3 world_pos_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT
         hrp::Vector3 world_ori_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
+        hrp::Vector3 world_vel_check_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
         hrp::dvector F_now; //current reference force
         bool pos_over_limit; //whether position error exceeded limit or not
         bool pos_reach_target; //whether position reached near target or not

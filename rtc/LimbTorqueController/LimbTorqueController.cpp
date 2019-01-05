@@ -3038,11 +3038,9 @@ void LimbTorqueController::estimateEEVelForce()
             hrp::Matrix33 state_update_matrix, prior_error_covar;
             Matrix32 kalman_gain;
             Vector2 observation;
-            double eepgain_value = param.ee_pgain_p(0,0); // assuming isotropic ee impedance gain
-            double eedgain_value = param.ee_dgain_p(0,0); // assuming isotropic ee impedance gain
             ee_state_coeff[ee_name] <<
                 1.0, RTC_PERIOD/virtual_ee_mass_for_vel[ee_name], 0.0,
-                -eepgain_value*RTC_PERIOD, 1.0 - eedgain_value*RTC_PERIOD/virtual_ee_mass[ee_name], 0.0,
+                0.0, 1.0, 0.0,
                 0.0, 0.0, 1.0;
             // x, y, z
             for (int i=0; i<3; i++){

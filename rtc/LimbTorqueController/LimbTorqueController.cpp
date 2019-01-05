@@ -806,18 +806,18 @@ void LimbTorqueController::getActualParameters()
         m_robot->joint(i)->u = 0;
         qold[i] = m_qCurrent.data[i];
     }
-    m_robot->rootLink()->p = target_root_p;
-    m_robot->rootLink()->R = target_root_R;
-    m_robot->calcForwardKinematics(); //is this part necessary?
+    m_robot->rootLink()->p = m_robotRef->rootLink()->p;
+    m_robot->rootLink()->R = m_robotRef->rootLink()->R;
+    //m_robot->calcForwardKinematics(); //is this part necessary?
 #if 1 //for legged robot
-    hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
-    hrp::Matrix33 senR = sen->link->R * sen->localR;
-    hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
+    // hrp::Sensor* sen = m_robot->sensor<hrp::RateGyroSensor>("gyrometer");
+    // hrp::Matrix33 senR = sen->link->R * sen->localR;
+    // hrp::Matrix33 act_Rs(hrp::rotFromRpy(m_rpy.data.r, m_rpy.data.p, m_rpy.data.y));
 #else
     hrp::Matrix33 senR = hrp::Matrix33::Identity();
     hrp::Matrix33 act_Rs = hrp::Matrix33::Identity();
 #endif
-    m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
+    //m_robot->rootLink()->R = act_Rs * (senR.transpose() * m_robot->rootLink()->R);
     m_robot->calcForwardKinematics();
 }
 

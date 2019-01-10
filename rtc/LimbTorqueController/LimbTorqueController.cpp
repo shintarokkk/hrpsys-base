@@ -2755,6 +2755,10 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
         std::cerr << "[" << m_profile.instance_name << "] You must not call giveTaskdescription while contact task!! fail:  [" << name << "]" << std::endl;
         return false;
     }
+    if( m_lt_param[name].amode == EMERGENCY ){
+        std::cerr << "[" << m_profile.instance_name << "] You must not call giveTaskdescription while emergency!! fail:  [" << name << "]" << std::endl;
+        return false;
+    }
     switch(task_description.type){
     case(MOVE_POS):
         td.type = MOVE_POS;

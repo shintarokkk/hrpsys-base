@@ -412,6 +412,7 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         td.emergency_recover_time = 2.0;
         td.add_static_force = false;
         td.static_rfu_gain = 0.01;
+        td.emergency_hold_fz = false;
         ts.F_now.resize(6);
         ts.F_now = hrp::dvector::Zero(6);
         ts.pos_over_limit = false;
@@ -436,6 +437,8 @@ RTC::ReturnCode_t LimbTorqueController::onInitialize()
         limb_task_state[ee_name] = ts;
         release_emergency_called[ee_name] = false;
         start_emergency_called = false;
+        start_emergency_release_fz_called = false;
+        release_emergency_hold_fz_called = false;
         fix_mode_normal[ee_name] = true; // do not enable modeselector by default
         // temporary: setting global for debugging
         check_dir_vel_err[ee_name] = 0.0;
@@ -1800,14 +1803,16 @@ void LimbTorqueController::ReferenceForceUpdater()
             // transition to emergency
             if(param.amode == EMERGENCY){
                 if(ts.em_transition_count > 0){ //emergency transition
-                    ts.F_now.head(3) = ts.F_em_init.head(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //force
-                    ts.F_now.tail(3) = ts.F_em_init.tail(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //moment
-                    // std::cout << "[emememeememem]" << std::endl;
-                    // std::cout << "em_transition_count = " << ts.em_transition_count << std::endl;
-                    // std::cout << "F_now = " << ts.F_now.transpose() << std::endl;
+                    if(td.emergency_hold_fz){
+                        ts.F_now.head(2) = ts.F_em_init.head(2) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //force
+                        ts.F_now.tail(3) = ts.F_em_init.tail(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //moment
+                    }else{
+                        ts.F_now.head(3) = ts.F_em_init.head(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //force
+                        ts.F_now.tail(3) = ts.F_em_init.tail(3) * (static_cast<double>(ts.em_transition_count) / static_cast<double>(ts.max_em_t_count)); //moment
+                    }
                     ts.em_transition_count--;
                 }
-                if(ts.em_transition_count <= 0){ //emergency stable: waiting for release
+                if(ts.em_transition_count <= 0 && !td.emergency_hold_fz){ //emergency stable: waiting for release
                     ts.F_now = hrp::dvector::Zero(6);
                 }
             } // end if emergency
@@ -1851,8 +1856,8 @@ void LimbTorqueController::ReferenceForceUpdater()
                 //ts.F_now.head(3) = ts.F_now.head(3) + td.static_rfu_gain * (- abs_forces[param.sensor_name] - ts.F_now.head(3));  //cution: just for evaluation of filter
             }else if(ts.remove_static_force_count > 0){
                 double redu_rate = (static_cast<double>(ts.remove_static_force_count) / static_cast<double>(max_rsfc));
-                ts.F_now.head(3) =  redu_rate * ts.F_em_init.head(3);
                 ts.remove_static_force_count--;
+                ts.F_now.head(3) = redu_rate * ts.F_em_init.head(3);
                 if(ts.remove_static_force_count == 0){
                     td.add_static_force = false;
                 }
@@ -1870,6 +1875,7 @@ void LimbTorqueController::ModeSelector()
     bool change_to_emergency = false; //for two arms
     bool change_to_idle = false; //for two arms
     bool dual_task_succeed = false; //for two arms
+    bool change_to_manip_holding_fz = false; //for two arms
     while(it != m_lt_param.end()){
         LTParam& param = it->second;
         std::string ee_name = it->first;
@@ -1960,15 +1966,25 @@ void LimbTorqueController::ModeSelector()
                             param.amode = EMERGENCY;
                             is_emergency = true;
                             reset_taskstate_bool(ts);
-                            ts.initial_pos = act_eepos[ee_name];
-                            ts.initial_ori = act_eequat[ee_name];
                             ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                             ts.em_transition_count = ts.max_em_t_count;
                             ts.F_em_init = ts.F_now;
                             ts.remove_static_force_count = 0; // 強制的にemergencyモードに入る
-                            td.add_static_force = false; // recoverしたとき変なことにならないように
-                            for(int i=0; i<param.manip->numJoints(); i++){
-                                ts.emergency_q(i) = param.manip->joint(i)->q;
+                            if(!td.emergency_hold_fz){
+                                td.add_static_force = false; // recoverしたとき変なことにならないように
+                            }
+                            if(td.emergency_hold_fz){
+                                ts.initial_pos = ref_eepos[ee_name];
+                                ts.initial_ori = ref_eequat[ee_name];
+                                for(int i=0; i<param.manip->numJoints(); i++){
+                                    ts.emergency_q(i) = m_ref_lt_param[ee_name].manip->joint(i)->q;
+                                }
+                            }else{
+                                ts.initial_pos = act_eepos[ee_name];
+                                ts.initial_ori = act_eequat[ee_name];
+                                for(int i=0; i<param.manip->numJoints(); i++){
+                                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                                }
                             }
                         }
                     }else if(ts.vel_over_thresh){
@@ -2067,7 +2083,21 @@ void LimbTorqueController::ModeSelector()
                     //TODO: make recovery from emregency mode...velocity check?
                     if(ts.em_transition_count <= 0){
                         //eusからの指令待機
-                        if (release_emergency_called[ee_name]){
+                        if(td.emergency_hold_fz){
+                            if(start_emergency_release_fz_called){
+                                start_emergency_called = true;
+                                td.emergency_hold_fz = false;
+                            }else if(release_emergency_hold_fz_called){
+                                reset_emergency_flag = true;
+                                if(td.dual){
+                                    change_to_manip_holding_fz = true;
+                                }else{
+                                    param.amode = MANIP_FREE;
+                                    release_emergency_hold_fz_called = false;
+                                }
+                            }
+                        }
+                        else if (release_emergency_called[ee_name]){
                             reset_emergency_flag = true;
                             if(td.dual){
                                 change_to_idle = true;
@@ -2099,6 +2129,7 @@ void LimbTorqueController::ModeSelector()
                 change_to_emergency = true;
                 is_emergency = true; //stops joint angle ref
                 start_emergency_called = false;
+                start_emergency_release_fz_called = false;
             }else if(change_to_contact){
                 param.amode = MANIP_CONTACT;
                 reset_taskstate_bool(ts);
@@ -2110,15 +2141,25 @@ void LimbTorqueController::ModeSelector()
                 }
             }else if(change_to_emergency){
                 ts.remove_static_force_count = 0;
-                td.add_static_force = false;
+                if(!td.emergency_hold_fz){
+                    td.add_static_force = false;
+                }
                 reset_taskstate_bool(ts);
-                ts.initial_pos = act_eepos[ee_name];
-                ts.initial_ori = act_eequat[ee_name];
                 ts.max_em_t_count = std::floor(td.emergency_recover_time / RTC_PERIOD);
                 ts.em_transition_count = ts.max_em_t_count;
                 ts.F_em_init = ts.F_now;
-                for(int i=0; i<param.manip->numJoints(); i++){
-                    ts.emergency_q(i) = param.manip->joint(i)->q;
+                if(td.emergency_hold_fz){
+                    ts.initial_pos = ref_eepos[ee_name];
+                    ts.initial_ori = ref_eequat[ee_name];
+                    for(int i=0; i<param.manip->numJoints(); i++){
+                        ts.emergency_q(i) = m_ref_lt_param[ee_name].manip->joint(i)->q;
+                    }
+                }else{
+                    ts.initial_pos = act_eepos[ee_name];
+                    ts.initial_ori = act_eequat[ee_name];
+                    for(int i=0; i<param.manip->numJoints(); i++){
+                        ts.emergency_q(i) = param.manip->joint(i)->q;
+                    }
                 }
                 param.amode = EMERGENCY;
             }else if(change_to_idle){
@@ -2141,6 +2182,9 @@ void LimbTorqueController::ModeSelector()
                 }
                 ts.F_em_init = ts.F_now;
                 ts.task_succeed_flag = true;
+            }else if(change_to_manip_holding_fz){
+                param.amode = MANIP_FREE;
+                release_emergency_hold_fz_called = false;
             }
         }
         it++;
@@ -2791,6 +2835,7 @@ bool LimbTorqueController::giveTaskDescription(const std::string& i_name_, OpenH
     }
     td.add_static_force = task_description.add_static_force;
     td.static_rfu_gain = task_description.static_rfu_gain;
+    td.emergency_hold_fz = task_description.emergency_hold_fz;
     // if add_static_force, start force transition
     reset_taskstate_bool(ts);
     if(static_force_is_added && !task_description.add_static_force){ //static_forceを消す遷移に入る
@@ -2851,6 +2896,7 @@ void LimbTorqueController::copyTaskDescription(OpenHRP::LimbTorqueControllerServ
     i_taskd_.emergency_recover_time = param.emergency_recover_time;
     i_taskd_.add_static_force = param.add_static_force;
     i_taskd_.static_rfu_gain = param.static_rfu_gain;
+    i_taskd_.emergency_hold_fz = param.emergency_hold_fz;
 }
 
 bool LimbTorqueController::getTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_)
@@ -2957,6 +3003,7 @@ bool LimbTorqueController::stopModeChange(const std::string &i_name_)
 }
 
 //強制的にEmergencyモードに入る(modechange始まるまでは呼べないようにしてある)
+//TODO: IDLE_NORMAL状態で呼ばれてしまうとおそらくMANIP_FREEに切り替わるまでずっとstart_emergency_called = trueを保持してしまう
 bool LimbTorqueController::startEmergency()
 {
     Guard guard(m_mutex);
@@ -2971,6 +3018,64 @@ bool LimbTorqueController::startEmergency()
         it++;
     }
     start_emergency_called = true;
+    return true;
+}
+
+// emergency_hold_fzでemergency入っているときに強制的に力を抜く
+//TODO: IDLE_NORMAL状態で呼ばれてしまうとおそらくMANIP_FREEに切り替わるまでずっとstart_emergency_release_fz_called = trueを保持してしまう
+bool LimbTorqueController::startEmergencyreleaseFz()
+{
+    Guard guard(m_mutex);
+    std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+    while(it != m_lt_param.end()){
+        std::string ee_name = it->first;
+        LTParam& param = it->second;
+        if( param.is_active && fix_mode_normal[ee_name] ){
+            std::cerr << "[" << m_profile.instance_name << "] Mode change has not been started at end effector [" << ee_name << "]" << std::endl;
+            return false;
+        }
+        it++;
+    }
+    start_emergency_release_fz_called = true;
+    return true;
+}
+
+// emergency_hold_fzでholdFzしながらemergencyをreleaseする
+bool LimbTorqueController::releaseEmergencyholdFz(const std::string &i_name_)
+{
+    Guard guard(m_mutex);
+    std::string name = std::string(i_name_);
+    if (strcmp(i_name_.c_str(), "all") == 0 || strcmp(i_name_.c_str(), "ALL") == 0){
+         std::map<std::string, LTParam>::iterator it = m_lt_param.begin();
+         while(it != m_lt_param.end()){
+             std::string ee_name = it->first;
+             LTParam& param = it->second;
+             if( param.is_active && fix_mode_normal[ee_name] ){
+                 std::cerr << "[" << m_profile.instance_name << "] Mode change has not been started at end effector [" << ee_name << "]" << std::endl;
+                 return false;
+             }
+             if( param.is_active && (param.amode!=EMERGENCY || !limb_task_target[ee_name].emergency_hold_fz) ){
+                 std::cerr << "[" << m_profile.instance_name << "] Not in emergency or emergency_hold_fz=false!! [" << ee_name << "]" << std::endl;
+                 return false;
+             }
+             it++;
+         }
+    }else{
+        if ( limb_task_state.find(i_name_) == limb_task_state.end() ) {
+            std::cerr << "[" << m_profile.instance_name << "] Could not find limb [" << i_name_ << "]" << std::endl;
+            return false;
+        }
+        LTParam& param = m_lt_param[name];
+        if( param.is_active && fix_mode_normal[name] ){
+            std::cerr << "[" << m_profile.instance_name << "] Mode change has not been started at end effector [" << name << "]" << std::endl;
+            return false;
+        }
+        if( param.amode!=EMERGENCY || !limb_task_target[name].emergency_hold_fz ){
+            std::cerr << "[" << m_profile.instance_name << "] Not in emergency or emergency_hold_fz=false!! [" << name << "]" << std::endl;
+            return false;
+        }
+    }
+    release_emergency_hold_fz_called = true;
     return true;
 }
 

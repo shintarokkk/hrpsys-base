@@ -112,6 +112,8 @@ public:
     bool startModeChange(const std::string &i_name_);
     bool stopModeChange(const std::string &i_name_);
     bool startEmergency();
+    bool startEmergencyreleaseFz();
+    bool releaseEmergencyholdFz(const std::string &i_name_);
     bool checkEmergencyFlag(const std::string& i_name_, bool& i_flag_);
 
 protected:
@@ -199,6 +201,7 @@ private:
         double emergency_recover_time; // set this to minus value for no emergency transition
         bool add_static_force; // whether to add static force during MANIP_FREE or not to //TODO: もしかしたらtask_target_typeのMOTION_ONLY=trueと同義かも
         double static_rfu_gain;
+        bool emergency_hold_fz; //whether to hold z-direction reference force during emergency
     };
 
     // エラー等の状態
@@ -341,7 +344,7 @@ private:
 
     // emergency flags
     bool reset_emergency_flag, is_emergency;
-    bool start_emergency_called;
+    bool start_emergency_called, start_emergency_release_fz_called, release_emergency_hold_fz_called;
 
     // returns quaternion that means rotation from act to ref
     inline void safe_quaternion_comparison(const hrp::dquaternion& _q_ref, const hrp::dquaternion& _q_act, hrp::dquaternion& _q_diff)

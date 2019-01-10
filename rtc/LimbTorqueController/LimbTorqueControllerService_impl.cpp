@@ -109,6 +109,16 @@ CORBA::Boolean LimbTorqueControllerService_impl::startEmergency()
     return m_limbtorque->startEmergency();
 }
 
+CORBA::Boolean LimbTorqueControllerService_impl::startEmergencyreleaseFz()
+{
+    return m_limbtorque->startEmergencyreleaseFz();
+}
+
+CORBA::Boolean LimbTorqueControllerService_impl::releaseEmergencyholdFz(const char *i_name_)
+{
+    return m_limbtorque->releaseEmergencyholdFz(std::string(i_name_));
+}
+
 CORBA::Boolean LimbTorqueControllerService_impl::checkEmergencyFlag(const char *i_name_, CORBA::Boolean_out i_flag_)
 {
     return m_limbtorque->checkEmergencyFlag(std::string(i_name_), i_flag_);

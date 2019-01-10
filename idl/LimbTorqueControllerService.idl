@@ -91,6 +91,7 @@ module OpenHRP
         double emergency_recover_time; // set this to minus value for no emergency transition
         boolean add_static_force; // whether to add static force during MANIP_FREE or not to
         double static_rfu_gain;
+        boolean emergency_hold_fz;
     };
 
     /**
@@ -230,6 +231,8 @@ module OpenHRP
       boolean startModeChange(in string name);
       boolean stopModeChange(in string name);
       boolean startEmergency();
+      boolean startEmergencyreleaseFz();
+      boolean releaseEmergencyholdFz(in string name);
       boolean checkEmergencyFlag(in string name, out boolean flag);
   };
 };

@@ -48,6 +48,7 @@ SequencePlayer::SequencePlayer(RTC::Manager* manager)
       m_baseRpyInitIn("baseRpyInit", m_baseRpyInit),
       m_zmpRefInitIn("zmpRefInit", m_zmpRefInit),
       m_qRefOut("qRef", m_qRef),
+      m_dqRefOut("dqRef", m_dqRef),
       m_tqRefOut("tqRef", m_tqRef),
       m_zmpRefOut("zmpRef", m_zmpRef),
       m_accRefOut("accRef", m_accRef),
@@ -87,6 +88,7 @@ RTC::ReturnCode_t SequencePlayer::onInitialize()
   
     // Set OutPort buffer
     addOutPort("qRef", m_qRefOut);
+    addOutPort("dqRef", m_dqRefOut);
     addOutPort("tqRef", m_tqRefOut);
     addOutPort("zmpRef", m_zmpRefOut);
     addOutPort("accRef", m_accRefOut);
@@ -174,6 +176,7 @@ RTC::ReturnCode_t SequencePlayer::onInitialize()
 
     // allocate memory for outPorts
     m_qRef.data.length(dof);
+    m_dqRef.data.length(dof);
     m_tqRef.data.length(dof);
     m_optionalData.data.length(optional_data_dim);
 
@@ -247,7 +250,7 @@ RTC::ReturnCode_t SequencePlayer::onExecute(RTC::UniqueId ec_id)
 	Guard guard(m_mutex);
 
         double zmp[3], acc[3], pos[3], rpy[3], wrenches[6*m_wrenches.size()];
-        m_seq->get(m_qRef.data.get_buffer(), zmp, acc, pos, rpy, m_tqRef.data.get_buffer(), wrenches, m_optionalData.data.get_buffer());
+        m_seq->get(m_qRef.data.get_buffer(), m_dqRef.data.get_buffer(), zmp, acc, pos, rpy, m_tqRef.data.get_buffer(), wrenches, m_optionalData.data.get_buffer());
         m_zmpRef.data.x = zmp[0];
         m_zmpRef.data.y = zmp[1];
         m_zmpRef.data.z = zmp[2];
@@ -258,6 +261,7 @@ RTC::ReturnCode_t SequencePlayer::onExecute(RTC::UniqueId ec_id)
         if (m_fixedLink != ""){
             for (int i=0; i<m_robot->numJoints(); i++){
                 m_robot->joint(i)->q = m_qRef.data[i];
+                m_robot->joint(i)->dq = m_dqRef.data[i];
             }
             for (int i=0; i<3; i++){
                 m_robot->rootLink()->p[i] = pos[i];
@@ -302,7 +306,9 @@ RTC::ReturnCode_t SequencePlayer::onExecute(RTC::UniqueId ec_id)
           m_wrenches[i].data[5] = wrenches[force_i++];
         }
         m_qRef.tm = m_qInit.tm;
+        m_dqRef.tm = m_qInit.tm;
         m_qRefOut.write();
+        m_dqRefOut.write();
         m_tqRefOut.write();
         m_zmpRefOut.write();
         m_accRefOut.write();

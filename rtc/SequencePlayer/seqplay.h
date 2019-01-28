@@ -46,7 +46,7 @@ public:
     void setJointAngle(unsigned int i_rank, double jv, double tm);
     void loadPattern(const char *i_basename, double i_tm);
     void clear(double i_timeLimit=0);
-    void get(double *o_q, double *o_zmp, double *o_accel,
+    void get(double *o_q, double *o_v, double *o_zmp, double *o_accel,
 	     double *o_basePos, double *o_baseRpy, double *o_tq, double *o_wrenches, double *o_optional_data);
     void go(const double *i_q, const double *i_zmp, const double *i_acc,
             const double *i_p, const double *i_rpy, const double *i_tq, const double *i_wrenches, const double *i_optional_data, double i_time, 

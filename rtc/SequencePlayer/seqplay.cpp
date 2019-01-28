@@ -351,16 +351,15 @@ void seqplay::pop_back()
 	}
 }
 
-void seqplay::get(double *o_q, double *o_zmp, double *o_accel,
+void seqplay::get(double *o_q, double *o_dq,  double *o_zmp, double *o_accel,
 				  double *o_basePos, double *o_baseRpy, double *o_tq, double *o_wrenches, double *o_optional_data)
 {
-	double v[m_dof];
-	interpolators[Q]->get(o_q, v);
+	interpolators[Q]->get(o_q, o_dq);
 	std::map<std::string, groupInterpolator *>::iterator it;
 	for (it=groupInterpolators.begin(); it!=groupInterpolators.end();){
 		groupInterpolator *gi = it->second;
 		if (gi){
-			gi->get(o_q, v);
+			gi->get(o_q, o_dq);
 			if (gi->state == groupInterpolator::removed){
 				groupInterpolators.erase(it++);
 				delete gi;

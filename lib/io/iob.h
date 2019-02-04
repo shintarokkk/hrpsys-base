@@ -258,6 +258,22 @@ extern "C"{
     int read_actual_torques(double *torques);
 
     /**
+     * @brief read current estimated joint torque[Nm] of joint "id"
+     * @param torque	estimated joint torque[Nm]
+     * @retval TRUE this function is supported
+     * @retval FALSE otherwise
+     */
+    int read_estimated_torque(int id, double *torques);
+
+    /**
+     * @brief read array of current estimated joint torques[Nm]
+     * @param torques	array of actual joint torque[Nm], length of array must be equal to number_of_joints()
+     * @retval TRUE this function is supported
+     * @retval FALSE otherwise
+     */
+    int read_estimated_torques(double *torques);
+
+    /**
      * @brief read command torque[Nm]
      * @param id	joint id
      * @param torque	joint torque[Nm]

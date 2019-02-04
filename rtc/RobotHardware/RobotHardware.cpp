@@ -56,6 +56,7 @@ RobotHardware::RobotHardware(RTC::Manager* manager)
     m_tauOut("tau", m_tau),
     m_ctauOut("ctau", m_ctau),
     m_pdtauOut("pdtau", m_pdtau),
+    m_esttauOut("esttau", m_esttau),
     m_servoStateOut("servoState", m_servoState),
     m_emergencySignalOut("emergencySignal", m_emergencySignal),
     m_rstate2Out("rstate2", m_rstate2),
@@ -85,6 +86,7 @@ RTC::ReturnCode_t RobotHardware::onInitialize()
   addOutPort("tau", m_tauOut);
   addOutPort("ctau", m_ctauOut);
   addOutPort("pdtau", m_pdtauOut);
+  addOutPort("esttau", m_esttauOut);
   addOutPort("servoState", m_servoStateOut);
   addOutPort("emergencySignal", m_emergencySignalOut);
   addOutPort("rstate2", m_rstate2Out);
@@ -140,6 +142,7 @@ RTC::ReturnCode_t RobotHardware::onInitialize()
   m_tau.data.length(m_robot->numJoints());
   m_ctau.data.length(m_robot->numJoints());
   m_pdtau.data.length(m_robot->numJoints());
+  m_esttau.data.length(m_robot->numJoints());
   m_servoState.data.length(m_robot->numJoints());
   m_qRef.data.length(m_robot->numJoints());
   m_dqRef.data.length(m_robot->numJoints());
@@ -293,6 +296,8 @@ RTC::ReturnCode_t RobotHardware::onExecute(RTC::UniqueId ec_id)
   m_ctau.tm = tm;
   m_robot->readPDControllerTorques(m_pdtau.data.get_buffer());
   m_pdtau.tm = tm;
+  m_robot->readEstimatedTorques(m_esttau.data.get_buffer());
+  m_esttau.tm = tm;
   for (unsigned int i=0; i<m_rate.size(); i++){
       double rate[3];
       m_robot->readGyroSensor(i, rate);
@@ -345,6 +350,7 @@ RTC::ReturnCode_t RobotHardware::onExecute(RTC::UniqueId ec_id)
   m_tauOut.write();
   m_ctauOut.write();
   m_pdtauOut.write();
+  m_esttauOut.write();
   m_servoStateOut.write();
   for (unsigned int i=0; i<m_rateOut.size(); i++){
       m_rateOut[i]->write();

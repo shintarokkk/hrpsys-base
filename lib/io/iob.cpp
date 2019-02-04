@@ -225,6 +225,16 @@ int read_actual_torques(double *torques)
     return FALSE;
 }
 
+int read_estimated_torque(int id, double *torque)
+{
+    return FALSE;
+}
+
+int read_estimated_torques(double *torques)
+{
+    return FALSE;
+}
+
 int read_command_torque(int id, double *torque)
 {
     return FALSE;

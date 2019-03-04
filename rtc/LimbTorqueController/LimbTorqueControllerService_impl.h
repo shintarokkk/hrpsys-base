@@ -32,7 +32,7 @@ public:
   CORBA::Boolean getCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam_out i_param_);
   CORBA::Boolean getCollisionTorque(const char *i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
   CORBA::Boolean getCollisionStatus(const char *i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_);
-  CORBA::Boolean startLog(const char *i_name_, const char *i_logname_);
+    CORBA::Boolean startLog(const char *i_name_, const char *i_logname_, const char *i_dirname_);
   CORBA::Boolean stopLog();
   CORBA::Boolean startRefdqEstimation(const char *i_name_);
   CORBA::Boolean stopRefdqEstimation(const char *i_name_);
@@ -43,6 +43,8 @@ public:
     CORBA::Boolean startModeChange(const char *i_name_);
     CORBA::Boolean stopModeChange(const char *i_name_);
     CORBA::Boolean startEmergency();
+    CORBA::Boolean startEmergencyreleaseFz();
+    CORBA::Boolean releaseEmergencyholdFz(const char *i_name_);
     CORBA::Boolean checkEmergencyFlag(const char *i_name_, CORBA::Boolean_out i_flag_);
 
   //

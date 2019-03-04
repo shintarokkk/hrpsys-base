@@ -69,8 +69,6 @@ module OpenHRP
      */
     enum TaskTargetType {
         MOVE_POS,
-        MOVE_ROT,
-        MOVE_POSROT,
         FIX,
         MOTION_ONLY
     };
@@ -83,23 +81,17 @@ module OpenHRP
         TaskTargetType type;
         boolean dual;
         DblSequence3 velocity_check_dir;
-        double target_velocity; //target translational velocity during contact (projected onto target dir)
         DblSequence F_init;
-        double vel_force_gain; //F_now = F_max - vel_force_gain*act_ee_vel
-        double w_force_gain; //F_now = F_max - w_force_gain*act_ee_w
         DblSequence3 rel_pos_target;
-        DblSequence rel_ori_target; //quaternion in vector4
         double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT
         double vel_check_limit; //velocity error threshold from MANIP_FREE to EMERGENCY
         double cont_vel_error_limit; //velocity threshold from MANIP_CONTACT to EMERGENCY
-        double cont_w_error_limit; //angular velocity threshold from MANIP_CONTACT to EMERGENCY
         double pos_target_thresh; //position distance threshold from MANIP_CONTACT to IDLE_NORMAL
         double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
-        double ori_target_thresh; //orientation distance threshold from MANIP_CONTACT to IDLE_NORMAL
-        double ori_error_limit; //orientation error threshold from MANIP_CONTACT to EMERGENCY
         double emergency_recover_time; // set this to minus value for no emergency transition
         boolean add_static_force; // whether to add static force during MANIP_FREE or not to
         double static_rfu_gain;
+        boolean emergency_hold_fz;
     };
 
     /**
@@ -108,25 +100,22 @@ module OpenHRP
     */
     struct taskState{
         DblSequence3 world_pos_target; //ee position target in MANIP_CONTACT
-        DblSequence world_ori_target; //ee orientation target in MANIP_CONTACT
         DblSequence3 world_pos_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT
         DblSequence3 world_ori_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
+        DblSequence3 world_vel_check_dir;
         DblSequence F_now; //current reference force
         boolean pos_over_limit; //whether position error exceeded limit or not
         boolean pos_reach_target; //whether position reached near target or not
         boolean ori_over_limit; //whether orientation error exceeded limit or not
-        boolean ori_reach_target; //whether orientation reached near target or not
         boolean vel_over_thresh; // wheter ee velocity exceeds threshold or not (from MANIP_FREE to MANIP_CONTACT) (from IDLE_COMPLIANT to IDLE_NORMAL)
         boolean vel_over_limit; // whether ee velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
-        boolean w_over_limit; // whether ee angular velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
         boolean torque_over_limit; // whether joint torque exceeds limit or not (in MANIP_CONTACT)
-        DblSequence F_eeR; //end-effector rotation for reference force in EmergencyEECompensation
+        DblSequence F_eeR; //for F_init
         long f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0)
         long max_f2c_t_count; //maximum value of f2c_transition_count
         long em_transition_count; //transition from EMERGENCY to IDLE_NORMAL
         long max_em_t_count; //maximum value of em_transition_count
         DblSequence F_em_init; //F_now at the moment of emergency transition
-        double init_point_w; //ee velocity to target direction at the time F_now reached F_init
         DblSequence3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         DblSequence initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         DblSequence emergency_q; //joint angles at the moment of transition to emrgency mode
@@ -213,7 +202,7 @@ module OpenHRP
      * @param logname: what kind of log to take: "collision" or "operational"
      * @return true if got successfully, false otherwise
      */
-    boolean startLog(in string name, in string logname);
+      boolean startLog(in string name, in string logname, in string dirname);
 
     /**
      * @brief stop spitting log
@@ -242,6 +231,8 @@ module OpenHRP
       boolean startModeChange(in string name);
       boolean stopModeChange(in string name);
       boolean startEmergency();
+      boolean startEmergencyreleaseFz();
+      boolean releaseEmergencyholdFz(in string name);
       boolean checkEmergencyFlag(in string name, out boolean flag);
   };
 };

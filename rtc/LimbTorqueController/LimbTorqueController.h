@@ -97,14 +97,8 @@ public:
     bool stopLimbTorqueController(const std::string& i_name_);
     bool setLimbTorqueControllerParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam i_param_);
     bool getLimbTorqueControllerParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_);
-    bool setCollisionParam(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::collisionParam i_param_);
-    bool getCollisionParam(const std::string& i_name_, LimbTorqueControllerService::collisionParam_out i_param_);
-    bool getCollisionTorque(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
-    bool getCollisionStatus(const std::string& i_name_, LimbTorqueControllerService::collisionStatus_out i_param_);
-    bool startLog(const std::string& i_name_, const std::string& i_logname_, const std::string& i_dirname_);
+    bool startLog(const std::string& i_name_, const std::string& i_dirname_);
     bool stopLog();
-    bool startRefdqEstimation(const std::string& i_name_);
-    bool stopRefdqEstimation(const std::string& i_name_);
     bool releaseEmergency(const std::string& i_name_, bool cancel); //現在に近い関節角を送ってから実行する
     bool giveTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription task_description);
     bool getTaskDescription(const std::string& i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_);
@@ -152,7 +146,7 @@ protected:
 
 private:
 
-    enum arm_mode {IDLE_NORMAL, IDLE_HARD, IDLE_COMPLIANT, MANIP_FREE, MANIP_CONTACT, EMERGENCY};
+    enum arm_mode {IDLE_NORMAL, MANIP, EMERGENCY};
 
     struct LTParam {
         std::string target_name; //Name of end link
@@ -165,7 +159,6 @@ private:
         arm_mode amode;
         hrp::Matrix33 ee_pgain_p, ee_pgain_r;
         hrp::Matrix33 ee_dgain_p, ee_dgain_r;
-        bool task_succeed; //whether task succeeded or not: become true after transition to emergency
     };
     struct ee_trans {
         std::string target_name;
@@ -173,67 +166,34 @@ private:
         hrp::Matrix33 localR;
         int ee_index;
     };
-    struct CollisionParam{
-        hrp::dvector collision_threshold;
-        double cgain, resist_gain;  //collision observer gain, collision resistance gain
-        int max_collision_uncheck_count;
-        int check_mode; //{0,1,2,3} = {no check, general momentum method, simple method, directional}
-        int handle_mode; //{0,1,2} = {no check, shock absorption, shock resistance}
-    };
 
-    // MOVE: シャベルを押し込んだり物を手だけ押したり
-    // FIX: 手でものを持った体相対の位置は固定しながら歩いたり、人間の作業のためにものを支えたり
-    // MOTION_ONLY: 手先位置を動かすだけが目標：終了後もMOTION_ONLYでMANIP_FREEモードを継続する
-    enum task_target_type {MOVE_POS, FIX, MOTION_ONLY};
     // wordings: limit->desired to be avoided | threshold->desired to reach
     struct TaskDescription{
-        task_target_type type;
         bool dual;
-        hrp::Vector3 velocity_check_dir; //velocity error checking direction to transition to MANIP_CONTACT TODO: angular velocity もチェック?
-        hrp::dvector F_init; //initial reference force
-        hrp::Vector3 rel_pos_target; //position target relative to initial state //in ee local at initial state
-        // 手先現在地とtargetを結ぶ直線に垂直な平面上に射影した手先位置がpos_error_limitだけ遠ざかったらemergency
-        double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT
-        double vel_check_limit; //velocity error threshold from MANIP_FREE to EMERGENCY
-        double cont_vel_error_limit; //velocity threshold from MANIP_CONTACT to EMERGENCY
-        double pos_target_thresh; //position distance threshold from MANIP_CONTACT to IDLE_NORMAL
-        double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
+        double vel_check_limit; //velocity error threshold from MANIP to EMERGENCY
         double emergency_recover_time; // set this to minus value for no emergency transition
-        bool add_static_force; // whether to add static force during MANIP_FREE or not to //TODO: もしかしたらtask_target_typeのMOTION_ONLY=trueと同義かも
+        bool add_static_force; // whether to add static force during MANIP_FREE or not to
         double static_rfu_gain;
         bool emergency_hold_fz; //whether to hold z-direction reference force during emergency
     };
 
     // エラー等の状態
     struct TaskState{
-        hrp::Vector3 world_pos_target; //ee position target in MANIP_CONTACT
-        hrp::Vector3 world_pos_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT
-        hrp::Vector3 world_ori_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
-        hrp::Vector3 world_vel_check_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
         hrp::dvector F_now; //current reference force
-        bool pos_over_limit; //whether position error exceeded limit or not
-        bool pos_reach_target; //whether position reached near target or not
-        bool ori_over_limit; //whether orientation error exceeded limit or not
-        bool vel_over_thresh; // wheter ee velocity exceeds threshold or not (from MANIP_FREE to MANIP_CONTACT) (from IDLE_COMPLIANT to IDLE_NORMAL)
         bool vel_over_limit; // whether ee velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
         bool torque_over_limit; // whether joint torque exceeds limit or not (in MANIP_CONTACT)
-        hrp::Matrix33 F_eeR; //for F_init
-        int f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0) //also used from add_static_force=false->add_static_force=true
-        int max_f2c_t_count; //maximum value of f2c_transition_count
         int em_transition_count; //transition to EMERGENCY: releaving reference force  //also used from add_static_force=false->add_static_force=true
         int max_em_t_count; //maximum value of em_transition_count
         hrp::dvector F_em_init; //F_now at the moment of emergency transition //also used at transition from add_static_force=false->add_static_force=true
         hrp::Vector3 initial_pos; //act ee pos(in world coordinate) at the moment of mode transition
         hrp::dquaternion initial_ori; //act ee orientation(in world coordinate) at the moment of mode transition
         hrp::dvector emergency_q; //joint angles at the moment of transition to emrgency mode
-        bool task_succeed_flag; //set true after succeed threshold is exceeded: LTParam.task_succeeded will be set true after transition to emergency is over
         int remove_static_force_count;
     };
     std::map<std::string, TaskDescription> limb_task_target;
     std::map<std::string, TaskState> limb_task_state;
 
     void copyLimbTorqueControllerParam (OpenHRP::LimbTorqueControllerService::limbtorqueParam& i_param_, const LTParam& param);
-    void copyCollisionParam(LimbTorqueControllerService::collisionParam& i_param_, const CollisionParam& param);
     void copyTaskDescription(OpenHRP::LimbTorqueControllerService::taskDescription& i_param_, const TaskDescription& param);
     void copyTaskState(OpenHRP::LimbTorqueControllerService::taskState& i_tasks_, const TaskState& param);
     void getTargetParameters();
@@ -249,11 +209,8 @@ private:
     void calcContactEECompensation(std::map<std::string, LTParam>::iterator it);
     void calcNullJointDumping(std::map<std::string, LTParam>::iterator it);
     void calcEmergencyNullJointDumping(std::map<std::string, LTParam>::iterator it);
-    void estimateRefdq();
-    void calcMinMaxAvoidanceTorque();// Do not use this for now: it is not compatible with reference torque regulator for now
 
     std::map<std::string, LTParam> m_lt_param, m_ref_lt_param;
-    std::map<std::string, CollisionParam> m_lt_col_param;
     std::map<std::string, ee_trans> ee_map;
     std::map<std::string, hrp::VirtualForceSensorParam> m_vfs;
     std::map<std::string, hrp::Vector3> abs_forces, abs_moments, abs_ref_forces, abs_ref_moments;
@@ -287,56 +244,29 @@ private:
     unsigned int loop;
     std::vector<double> default_pgain, default_dgain;
 
-    void CollisionDetector();
-    void calcGeneralizedInertiaMatrix(std::map<std::string, LTParam>::iterator it);
-    std::map<std::string, hrp::dmatrix> gen_imat, old_gen_imat; //generalized inertia matrix
-    std::map<std::string, hrp::dvector> gen_mom, old_gen_mom, gen_mom_res; //generalized momentum, and its residual
-    std::map<std::string, hrp::dvector> accum_tau, accum_beta, accum_res, initial_gen_mom;
-    std::map<std::string, int> collision_uncheck_count;
-    std::map<std::string, std::string> collision_link;
-    std::map<std::string, bool> collision_detector_initialized, gen_imat_initialized;
-    std::vector<hrp::dmatrix> link_inertia_matrix; //6D inertia matrix
-    std::vector<double> default_cgain, default_rgain;
-
-    // collision-param
-    std::map<std::string, hrp::dmatrix> gen_mom_observer_gain, collision_resistance_gain;
-    std::map<std::string, hrp::dvector> default_collision_threshold;
-    int max_collision_uncheck_count;
     hrp::dvector actual_torque_vector;
 
     // for debug log
-    std::map<std::string, std::ofstream*> debug_mom, debug_actau, debug_acbet, debug_acres, debug_res, debug_reftq, debug_f; //CollisionDetector
+    std::map<std::string, std::ofstream*> debug_reftq;
     std::map<std::string, std::ofstream*> debug_ee_pocw, debug_ee_vwcw, debug_eect, debug_nst, debug_acteevel, debug_refeevel, debug_acteew, debug_refeew; //calcEECompensation
     std::map<std::string, std::ofstream*> debug_ee_poserror, debug_ee_orierror, debug_ee_velerror, debug_ee_werror; //calcEECompensation
-    std::map<std::string, std::ofstream*> debug_dqest, debug_dqact, debug_qest, debug_qact, debug_qref; //estimateRefdq
+    std::map<std::string, std::ofstream*> debug_dqact, debug_qact, debug_qref;
     std::map<std::string, std::ofstream*> debug_acteescrew, debug_acteewrench; //ee vel&force estimation
     void DebugOutput();
     bool spit_log;
-    int log_type; //1:collision, 2:operational
 
-    // reference velocity estimation
-    hrp::dvector overwritten_qRef_prev, estimated_reference_velocity, transition_velest, log_est_q, log_act_q, log_ref_q;
-    // IIR filter parameters (for velocity estimation)
-    double iir_cutoff_frequency, iir_alpha, iir_a0, iir_a1, iir_a2, iir_b1, iir_b2;
-    std::map<std::string, hrp::dvector> velest_now, velest_prev, velest_prevprev, imp_now, imp_prev, imp_prevprev; //estimated joint velocities and velocity generated by impedance(ee compensation)
-    std::map<std::string, bool> velest_initialized, overwrite_refangle;
-    std::map<std::string, int> stop_overwriting_q_transition_count;
-    int max_stop_overwriting_q_transition_count;
+    hrp::dvector log_act_q, log_ref_q;
 
     // reference torque regulator
     hrp::dvector invdyn_accvel_tq, invdyn_grav_tq, eecomp_tq, nullspace_tq;
     hrp::dvector reference_torque;
 
     // Error Checkers
-    std::map<std::string, bool> poserrchecker_initialized;
-    std::map<std::string, hrp::dvector> minmaxavoid_torque; //零以外でminmax_detected=trueの役割
     std::map<std::string, bool> release_emergency_called;
     std::map<std::string, bool> fix_mode_normal; //idle_normalにモード固定(servooff時など使う): 他のエラーチェック等より優先する
     hrp::dvector reference_climit; //climit used for reference torque
     // error limits
-    double idle_vlimit, idle_olimit, compliant_end_vel_thresh;
     void VelocityErrorChecker();
-    void PositionErrorChecker();
     void ActualTorqueChecker();
     void ReferenceTorqueChecker();
     void ReferenceForceUpdater();
@@ -360,22 +290,12 @@ private:
 
     inline void reset_taskstate_bool(TaskState& _ts)
     {
-        _ts.pos_over_limit = false;
-        _ts.pos_reach_target = false;
-        _ts.ori_over_limit = false;
-        _ts.vel_over_thresh = false;
         _ts.vel_over_limit = false;
         _ts.torque_over_limit = false;
-        _ts.task_succeed_flag = false;
         _ts.em_transition_count = 0;
-        _ts.f2c_transition_count = 0;
         //remove_static_force_countはリセットしない(IDLE_NORMAL->IDLE_COMPLIANTなどでゼロにされると困る)
     }
 
-    // temporary setting these global for debugging
-    //MOVE_POS
-    std::map<std::string, double> check_dir_vel_err, other_dir_vel_err, dist_to_target, pos_error_norm;
-    std::map<std::string, std::ofstream*> debug_cdve, debug_odve, debug_dtt, debug_pen;
     std::map<std::string, hrp::dvector> world_ref_wrench; //actualはabs_forces
     std::map<std::string, std::ofstream*> debug_wrw; //actualはdebug_acteewrench
 
@@ -392,8 +312,8 @@ private:
     std::map<std::string, std::vector<hrp::Matrix33> > ee_error_covar;
     // reordered estimate values
     std::map<std::string, hrp::Vector3> filtered_ee_vel, filtered_f_d, filtered_f_s;
-    void estimateEEVelForce();
-    void estimateEEVelForce_init(const std::map<std::string, LTParam>::iterator it);
+    void calcStaticForceFilter();
+    void calcStaticForceFilter_init(const std::map<std::string, LTParam>::iterator it);
 
     std::map<std::string, std::ofstream*> debug_filtereevel, debug_filtereef_d, debug_filtereef_s;
     std::map<std::string, std::ofstream*> debug_act_torque;
@@ -401,8 +321,7 @@ private:
 
     // for raw filter
     std::map<std::string, hrp::Vector3> raw_act_ee_vel, raw_ref_ee_vel, prev_act_eepos, prev_ref_eepos;
-    std::map<std::string, std::ofstream*> debug_raw_acteevel, debug_raw_refeevel, debug_raw_odve, debug_raw_cdve;
-    std::map<std::string, double> raw_odve, raw_cdve;
+    std::map<std::string, std::ofstream*> debug_raw_acteevel, debug_raw_refeevel;
 };
 
 extern "C"

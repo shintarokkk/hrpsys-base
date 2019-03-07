@@ -28,11 +28,8 @@ module OpenHRP
      * @brief Mode of arm control
      */
     enum ArmMode {
-        IDLE_NORMAL,
-        IDLE_HARD,
-        IDLE_COMPLIANT,
-        MANIP_FREE,
-        MANIP_CONTACT,
+        IDLE,
+        MANIP,
         EMERGENCY
     };
 
@@ -47,30 +44,6 @@ module OpenHRP
         ArmMode amode;
         DblSequence ee_pgain;
         DblSequence ee_dgain;
-        boolean task_succeed;
-    };
-
-    /**
-     * @struct collisionParam
-     * @brief collision parameters for one end-effector.
-     */
-    struct collisionParam {
-        DblSequence Thresh;
-        double Cgain;
-        double Rgain;
-        long MaxCount;
-        long CheckMode;
-        long HandleMode;
-    };
-
-    /**
-     * @enum TaskTargetType
-     * @brief Mode of arm control
-     */
-    enum TaskTargetType {
-        MOVE_POS,
-        FIX,
-        MOTION_ONLY
     };
 
     /**
@@ -78,16 +51,8 @@ module OpenHRP
      * @brief task description
      */
     struct taskDescription {
-        TaskTargetType type;
         boolean dual;
-        DblSequence3 velocity_check_dir;
-        DblSequence F_init;
-        DblSequence3 rel_pos_target;
-        double vel_check_thresh; //velocity error threshold from MANIP_FREE to MANIP_CONTACT
         double vel_check_limit; //velocity error threshold from MANIP_FREE to EMERGENCY
-        double cont_vel_error_limit; //velocity threshold from MANIP_CONTACT to EMERGENCY
-        double pos_target_thresh; //position distance threshold from MANIP_CONTACT to IDLE_NORMAL
-        double pos_error_limit; //position error threshold from MANIP_CONTACT to EMERGENCY
         double emergency_recover_time; // set this to minus value for no emergency transition
         boolean add_static_force; // whether to add static force during MANIP_FREE or not to
         double static_rfu_gain;
@@ -95,24 +60,13 @@ module OpenHRP
     };
 
     /**
-    * @struct taskDescription
-    * @brief task description
+    * @struct taskState
+    * @brief task state
     */
     struct taskState{
-        DblSequence3 world_pos_target; //ee position target in MANIP_CONTACT
-        DblSequence3 world_pos_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT
-        DblSequence3 world_ori_targ_dir; //normalized direction of target from initial state: in MANIP_CONTACT: use only for angular velocity
-        DblSequence3 world_vel_check_dir;
         DblSequence F_now; //current reference force
-        boolean pos_over_limit; //whether position error exceeded limit or not
-        boolean pos_reach_target; //whether position reached near target or not
-        boolean ori_over_limit; //whether orientation error exceeded limit or not
-        boolean vel_over_thresh; // wheter ee velocity exceeds threshold or not (from MANIP_FREE to MANIP_CONTACT) (from IDLE_COMPLIANT to IDLE_NORMAL)
         boolean vel_over_limit; // whether ee velocity exceeds limit or not (in MANIP_CONTACT and MANIP_FREE)
         boolean torque_over_limit; // whether joint torque exceeds limit or not (in MANIP_CONTACT)
-        DblSequence F_eeR; //for F_init
-        long f2c_transition_count; //transition from MANIP_FREE to MANIP_CONTACT (F_now = F_init @ count==0)
-        long max_f2c_t_count; //maximum value of f2c_transition_count
         long em_transition_count; //transition from EMERGENCY to IDLE_NORMAL
         long max_em_t_count; //maximum value of em_transition_count
         DblSequence F_em_init; //F_now at the moment of emergency transition
@@ -122,17 +76,6 @@ module OpenHRP
         boolean task_succeed_flag; //set true after succeed threshold is exceeded: LTParam.task_succeeded will be set true after transition to emergency is over
         long remove_static_force_count;
     };
-
-    /**
-     * @struct collisionStatus
-     * @brief collision status for one end-effector.
-     */
-    struct collisionStatus {
-        DblSequence CollisionTorque;
-        boolean IsCollision;
-        string CollisionLink;
-    };
-
 
       /**
        * @brief start limb torque controller
@@ -165,64 +108,17 @@ module OpenHRP
     boolean getLimbTorqueControllerParam(in string name, out limbtorqueParam i_param);
 
     /**
-     * @brief set collision parameters.
-     * @param i_param input new collision parameters
-     * @param name collision param's name, which basically corresponds to force sensor name
-     * @return true if set successfully, false otherwise
-     */
-    boolean setCollisionParam(in string name, in collisionParam i_param);
-
-    /**
-     * @brief get collision parameters.
-     * @param i_param ouput collision parameters
-     * @param name collision param's name, which basically corresponds to force sensor name
-     * @return true if set successfully, false otherwise
-     */
-    boolean getCollisionParam(in string name, out collisionParam i_param);
-
-    /**
-     * @brief get output of collision detector.
-     * @param name limb torque controller param's name, which basically corresponds to force sensor name
-     * @param c_vector torque vector
-     * @return true if got successfully, false otherwise
-     */
-    boolean getCollisionTorque(in string name, out DblSequence c_vector);
-
-    /**
-     * @brief get collision status.
-     * @param name limb torque controller param's name, which basically corresponds to force sensor name
-     * @param i_param output collision status
-     * @return true if got successfully, false otherwise
-     */
-    boolean getCollisionStatus(in string name, out collisionStatus i_param);
-
-    /**
      * @brief start spitting log
      * @param name: base file path to store log files: if name=="/tmp", then log files will be stored under "/tmp/LimbTorqueControllerDebug/"
-     * @param logname: what kind of log to take: "collision" or "operational"
      * @return true if got successfully, false otherwise
      */
-      boolean startLog(in string name, in string logname, in string dirname);
+      boolean startLog(in string name, in string dirname);
 
     /**
      * @brief stop spitting log
      * @return true if got successfully, false otherwise
      */
     boolean stopLog();
-
-    /**
-     * @brief start overwriting reference joint angles using estimated reference velocity
-     * @param name: end effector
-     * @return true if got successfully, false otherwise
-     */
-    boolean startRefdqEstimation(in string name);
-
-    /**
-     * @brief stop overwriting reference joint angles using estimated reference velocity
-     * @param name: end effector
-     * @return true if got successfully, false otherwise
-     */
-    boolean stopRefdqEstimation(in string name);
 
       boolean releaseEmergency(in string name, in boolean cancel);
     boolean giveTaskDescription(in string name, in taskDescription taskd);

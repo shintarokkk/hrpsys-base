@@ -28,14 +28,8 @@ public:
   CORBA::Boolean stopLimbTorqueController(const char *i_name_);
   CORBA::Boolean setLimbTorqueControllerParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::limbtorqueParam &i_param_);
   CORBA::Boolean getLimbTorqueControllerParam(const char *i_name_, OpenHRP::LimbTorqueControllerService::limbtorqueParam_out i_param_);
-  CORBA::Boolean setCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam &i_param_);
-  CORBA::Boolean getCollisionParam(const char *i_name_, const OpenHRP::LimbTorqueControllerService::collisionParam_out i_param_);
-  CORBA::Boolean getCollisionTorque(const char *i_name_, OpenHRP::LimbTorqueControllerService::DblSequence_out c_vec_);
-  CORBA::Boolean getCollisionStatus(const char *i_name_, OpenHRP::LimbTorqueControllerService::collisionStatus_out i_param_);
-    CORBA::Boolean startLog(const char *i_name_, const char *i_logname_, const char *i_dirname_);
+    CORBA::Boolean startLog(const char *i_name_, const char *i_dirname_);
   CORBA::Boolean stopLog();
-  CORBA::Boolean startRefdqEstimation(const char *i_name_);
-  CORBA::Boolean stopRefdqEstimation(const char *i_name_);
     CORBA::Boolean releaseEmergency(const char *i_name_, CORBA::Boolean cancel);
   CORBA::Boolean giveTaskDescription(const char *i_name_, const OpenHRP::LimbTorqueControllerService::taskDescription &i_taskd_);
   CORBA::Boolean getTaskDescription(const char *i_name_, OpenHRP::LimbTorqueControllerService::taskDescription_out i_taskd_);
